@@ -1,0 +1,17 @@
+# Local tools
+/packwiz.exe
+
+# Build output and caches
+/dist/
+*.mrpack
+/.packwiz-cache/
+/node_modules/
+
+# IDE and operating-system files
+/.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+*.bak
+*.backup

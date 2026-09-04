@@ -1,0 +1,79 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Git Commit CZ",
+      "detail": "启动 Git Commit CZ；进行规范化的提交。",
+      "type": "process",
+      "command": "npm",
+      "args": ["run", "commit"],
+      "problemMatcher": [],
+      "group": "build",
+      "presentation": {
+        "focus": true,
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Pack: 交互式管理",
+      "detail": "启动 pack CLI；先选择目标实例与 Minecraft 版本。",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/pack.ps1"
+      ],
+      "problemMatcher": [],
+      "group": "build",
+      "presentation": {
+        "focus": true,
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Pack: 刷新索引",
+      "detail": "执行 pack.ps1 refresh；使用 instances.json 中的默认目标。",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/pack.ps1",
+        "refresh"
+      ],
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Pack: 校验",
+      "detail": "执行 pack.ps1 validate。",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/pack.ps1",
+        "validate"
+      ],
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Pack: 构建 MRPack",
+      "detail": "执行 pack.ps1 build，导出 Modrinth .mrpack 至 dist/。",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/pack.ps1",
+        "build"
+      ],
+      "problemMatcher": [],
+      "group": {
+        "kind": "build"
+      }
+    }
+  ]
+}

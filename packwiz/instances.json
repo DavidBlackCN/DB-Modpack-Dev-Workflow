@@ -1,0 +1,20 @@
+{
+  "default": {
+    "instance": "client",
+    "version": "26.2"
+  },
+  "packs": [
+    {
+      "instance": "client",
+      "version": "26.2",
+      "path": "packwiz/client/26.2",
+      "artifact": "example-client-26.2"
+    },
+    {
+      "instance": "server",
+      "version": "26.2",
+      "path": "packwiz/server/26.2",
+      "artifact": "example-server-26.2"
+    }
+  ]
+}

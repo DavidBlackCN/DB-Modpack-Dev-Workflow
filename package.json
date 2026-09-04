@@ -1,0 +1,25 @@
+{
+  "name": "db-packwiz-example-pack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "支持多实例、多 Minecraft 版本的 packwiz 标准示例仓库",
+  "scripts": {
+    "commit": "cz",
+    "lint:commits": "commitlint --from HEAD~1 --to HEAD --verbose",
+    "discover": "pwsh -NoProfile -File ./scripts/discover-packs.ps1",
+    "validate": "pwsh -NoProfile -File ./scripts/pack.ps1 validate",
+    "build": "pwsh -NoProfile -File ./scripts/pack.ps1 build"
+  },
+  "author": "DavidBlackCN",
+  "license": "MIT",
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "cz-git": "^1.13.1"
+  },
+  "config": {
+    "commitizen": {
+      "path": "node_modules/cz-git"
+    }
+  }
+}
