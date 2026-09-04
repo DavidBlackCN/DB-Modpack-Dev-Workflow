@@ -20,7 +20,9 @@
 
 ```text
 .
-├─ .github/workflows/validate.yml   # 提交检查 + 动态构建矩阵
+├─ .github/workflows/
+│  ├─ commitlint.yml                # 所有提交的规范检查
+│  └─ validate.yml                  # 仅关键路径触发的动态构建矩阵
 ├─ packwiz/
 │  ├─ README.md                     # Packwiz 工程目录约定
 │  ├─ instances.json                # 实例、版本、路径与 artifact 的唯一数据源
@@ -175,16 +177,15 @@ Copy-Item (Join-Path (go env GOPATH) 'bin/packwiz.exe') .\packwiz.exe
 
 ## GitHub Actions
 
-`.github/workflows/validate.yml` 在 push、Pull Request 和手动触发时执行：
+工作流按职责拆分：
 
-1. 安装依赖并用 commitlint 检查提交范围。
-2. 检测 `packwiz/**`、`scripts/**`、`.github/workflows/validate.yml` 与 `.gitattributes` 是否变化。
-3. 仅在关键路径变化或手动触发时校验 `instances.json`，输出动态 matrix。
+1. `.github/workflows/commitlint.yml` 在每次 push、Pull Request 或手动触发时安装依赖并检查提交范围。
+2. `.github/workflows/validate.yml` 仅在 `packwiz/**`、`scripts/**`、`.github/workflows/validate.yml` 或 `.gitattributes` 变化时自动运行；手动触发不受路径限制。
+3. 打包工作流校验 `instances.json` 并输出动态 matrix。
 4. 使用固定的 packwiz 提交和上游指定的 Go 版本构建工具，避免 `@latest` 上游变化破坏 CI。
-5. 执行严格校验，并确认刷新后的 `pack.toml`、`index.toml` 已提交。
-6. 构建 `.mrpack`，按清单中的 `artifact` 名称分别上传。
+5. 对每个目标执行严格校验，确认刷新后的 `pack.toml`、`index.toml` 已提交，然后构建并上传 `.mrpack`。
 
-仅修改 README 等非关键文件时仍会运行 commitlint，但不会触发打包；`workflow_dispatch` 始终构建全部目标。
+仅修改 README 等非关键文件时只会出现 commitlint 工作流，不会创建 packwiz 发现或矩阵构建任务。
 
 新增目标只改 `instances.json`，无需编辑工作流。
 
