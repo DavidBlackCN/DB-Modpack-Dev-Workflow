@@ -234,4 +234,4 @@ git status --short
 
 ## License
 
-MIT
+[CC0-1.0](./LICENSE)
