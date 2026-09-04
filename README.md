@@ -180,7 +180,7 @@ Copy-Item (Join-Path (go env GOPATH) 'bin/packwiz.exe') .\packwiz.exe
 1. 安装依赖并用 commitlint 检查提交范围。
 2. 检测 `packwiz/**`、`scripts/**`、`.github/workflows/validate.yml` 与 `.gitattributes` 是否变化。
 3. 仅在关键路径变化或手动触发时校验 `instances.json`，输出动态 matrix。
-4. 为每个 `instance/version` 并行安装 packwiz。
+4. 使用固定的 packwiz 提交和上游指定的 Go 版本构建工具，避免 `@latest` 上游变化破坏 CI。
 5. 执行严格校验，并确认刷新后的 `pack.toml`、`index.toml` 已提交。
 6. 构建 `.mrpack`，按清单中的 `artifact` 名称分别上传。
 
