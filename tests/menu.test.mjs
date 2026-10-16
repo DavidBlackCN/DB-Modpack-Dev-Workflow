@@ -56,6 +56,19 @@ async function fixture(t,override={}) {
   return {root,bin,execute,calls,commands};
 }
 const options={skip:pwsh?false:'未安装 PowerShell 7.3+，菜单测试未执行'};
+
+test('纯菜单导航不重复查询状态，手动刷新和失败操作后重新读取',options,async t=>{
+  const f=await fixture(t,{fail:'doctor'});
+  const result=await f.execute([], '1\n0\n2\n0\nd\nwrong\nr\n7\n3\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  const calls=await f.commands();
+  // Initial load, explicit refresh, and refresh after the failed operation.
+  for(const command of ['status','targets','runtimes']) {
+    assert.equal(calls.filter(a=>a[0]===command).length,3,JSON.stringify(calls));
+  }
+  assert.equal(calls.filter(a=>a[0]==='doctor').length,1);
+  assert.match(result.stdout,/fixture failure/);
+});
 test('菜单无绑定可启动退出，无效选择返回菜单，帮助不依赖 pnpm',options,async t=>{
   const f=await fixture(t,{bindings:[]});
   const result=await f.execute([], 'wrong\n0\n');assert.equal(result.code,0,result.stdout+result.stderr);

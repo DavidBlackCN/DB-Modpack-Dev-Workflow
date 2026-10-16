@@ -436,8 +436,12 @@ function Show-Menu {
         '8'=@('🌿 查看 Git 状态','🔎 查看 Git Diff','📝 交互式提交','✅ 校验提交信息')
     }
     $section=''
+    $refresh=$true
     while ($true) {
-        try { Refresh-Selection } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
+        if ($refresh) {
+            try { Refresh-Selection } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
+            $refresh=$false
+        }
         Show-Page $titles[[int]$section] $hints[[int]$section]
         if (-not $section) {
             for ($i=1; $i -le 9; $i++) {
@@ -452,21 +456,24 @@ function Show-Menu {
             $items=$menus[$section]
             for ($i=0; $i -lt $items.Count; $i++) { Write-Host "  [$($i+1)] $($items[$i])" }
         }
-        Write-Host "`n  [d] 📄 查看上次操作的完整输出" -ForegroundColor DarkGray
+        Write-Host "`n  [r] 🔄 刷新目标、实例与 Git 状态" -ForegroundColor DarkGray
+        Write-Host '  [d] 📄 查看上次操作的完整输出' -ForegroundColor DarkGray
         $backLabel=if ($section) { '返回上一级' } else { '退出' }
         Write-Host "  [0] ↩️ $backLabel`n" -ForegroundColor DarkGray
         $choice=Read-Choice '请选择'
         if ($choice -eq '0') { if (-not $section) { return }; $section=''; continue }
+        if ($choice -eq 'r') { $refresh=$true; continue }
         if ($choice -eq 'd') { Write-Host ($script:LastResult.Raw ?? '暂无操作输出。'); continue }
         try {
             if (-not $section) {
-                if ($choice -eq '9') { Invoke-Advanced }
+                if ($choice -eq '9') { $refresh=$true; Invoke-Advanced }
                 elseif ($menus.ContainsKey($choice)) { $section=$choice }
                 else { Write-Host '请输入菜单编号。' -ForegroundColor Yellow }
                 continue
             }
             $number=0
             if (-not [int]::TryParse($choice,[ref]$number) -or $number -lt 1 -or $number -gt $menus[$section].Count) { Write-Host '请输入菜单编号。' -ForegroundColor Yellow; continue }
+            $refresh=$true
             switch ($section) {
                 '1' { Invoke-Development $choice }; '2' { Invoke-Mods $choice }; '3' { Invoke-Runtimes $choice }
                 '4' { Invoke-Collect $choice }; '5' { Invoke-Builds $choice }; '6' { Invoke-Apply $choice }
