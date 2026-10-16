@@ -5,16 +5,24 @@ import {loadWorkspace,readJson,safePath} from './lib/workspace.mjs';
 import {run,requireSuccess} from './lib/pakku.mjs';
 import {releaseTag} from './lib/github.mjs';
 
+// Keep build inputs explicit: editor settings, tests and the menu do not change exported packs.
+const sharedBuildFiles=new Set(['workspace.json','toolchain.json','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','.npmrc','.gitignore','.gitattributes','.github/workflows/ci.yml','.github/workflows/release.yml']);
+const sharedBuildInput=file=>sharedBuildFiles.has(file)||file.startsWith('tools/lib/')||['tools/mp.mjs','tools/ci.mjs','tools/release.mjs'].includes(file);
 export function affectedTargets(workspace,files,all=false) {
   if(all)return workspace.targets.map(t=>t.id);
   const selected=new Set();
   for(const file of files) {
     if(/(^|\/)AGENTS\.md$/.test(file))continue;
-    if(file.startsWith('docs/')||/^[^/]+\.md$/.test(file)||['LICENSE','.gitattributes'].includes(file))continue;
     const target=workspace.targets.find(t=>file.startsWith(t.path+'/'));
-    if(target)selected.add(target.id);else return workspace.targets.map(t=>t.id);
+    if(target)selected.add(target.id);
+    else if(sharedBuildInput(file))return workspace.targets.map(t=>t.id);
   }
   return [...selected].sort();
+}
+export function needsTests(workspace,files,all=false) {
+  return all||affectedTargets(workspace,files).length>0||files.some(file=>
+    file==='ci.ps1'||file.startsWith('tests/')||file.startsWith('tools/')||file.startsWith('.github/workflows/')||
+    ['cz.config.cjs','commitlint.config.cjs'].includes(file));
 }
 export async function validateTag(root,tag) {
   const workspace=await loadWorkspace(root),target=workspace.targets.find(t=>t.id===tag?.split('/')[1]);
@@ -31,9 +39,10 @@ export async function ciPlan(root,event,eventName) {
   let files=[];
   if(!all) {
     const range=event.pull_request?`${base}...${head}`:`${base}..${head}`;
-    files=requireSuccess(await run('git',['diff','--name-only','-z',range],{cwd:root,capture:true})).stdout.split('\0').filter(Boolean);
+    // Treat renames as deletion + addition so both targets are selected when a file moves.
+    files=requireSuccess(await run('git',['diff','--no-renames','--name-only','-z',range],{cwd:root,capture:true})).stdout.split('\0').filter(Boolean);
   }
-  return {targets:affectedTargets(workspace,files,all),base:all?'':base,head,files};
+  return {targets:affectedTargets(workspace,files,all),runTests:needsTests(workspace,files,all),base:all?'':base,head,files};
 }
 export async function assertClean(root) {
   const result=requireSuccess(await run('git',['status','--porcelain','--untracked-files=all'],{cwd:root,capture:true}));
@@ -45,7 +54,7 @@ async function main() {
   if(command==='plan') {
     const event=process.env.GITHUB_EVENT_PATH?await readJson(process.env.GITHUB_EVENT_PATH):{};
     const plan=await ciPlan(root,event,process.env.GITHUB_EVENT_NAME??'workflow_dispatch');
-    await emit({matrix:{include:plan.targets.map(target=>({target}))},has_targets:String(Boolean(plan.targets.length)),base:plan.base,head:plan.head});
+    await emit({matrix:{include:plan.targets.map(target=>({target}))},has_targets:String(Boolean(plan.targets.length)),run_tests:String(plan.runTests),base:plan.base,head:plan.head});
   }else if(command==='tag') {
     const {target,version}=await validateTag(root,process.env.RELEASE_TAG??process.argv[3]);await emit({target:target.id,version});
   }else if(command==='build') {

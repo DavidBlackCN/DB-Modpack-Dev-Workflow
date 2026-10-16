@@ -16,6 +16,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has_targets: ${{ steps.plan.outputs.has_targets }}
+      run_tests: ${{ steps.plan.outputs.run_tests }}
       base: ${{ steps.plan.outputs.base }}
       head: ${{ steps.plan.outputs.head }}
     steps:
@@ -40,6 +41,8 @@ jobs:
           COMMIT_HEAD: ${{ steps.plan.outputs.head }}
         run: node tools/ci.mjs lint
   test:
+    needs: plan
+    if: needs.plan.outputs.run_tests == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -115,7 +118,8 @@ jobs:
           TEST: ${{ needs.test.result }}
           BUILD: ${{ needs.build.result }}
           HAS_TARGETS: ${{ needs.plan.outputs.has_targets }}
+          RUN_TESTS: ${{ needs.plan.outputs.run_tests }}
         run: |
           test "$PLAN" = success
-          test "$TEST" = success
+          if [ "$RUN_TESTS" = true ]; then test "$TEST" = success; else test "$TEST" = skipped; fi
           if [ "$HAS_TARGETS" = true ]; then test "$BUILD" = success; else test "$BUILD" = skipped; fi
