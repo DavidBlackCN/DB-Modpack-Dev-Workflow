@@ -67,3 +67,7 @@ pnpm run lint:commits
 ```
 
 检查一段提交历史可用 `pnpm run lint:commits -- --from <base> --to HEAD`。提交菜单和规范沿用 [DB-Packwiz-Example-Pack](https://github.com/DavidBlackCN/DB-Packwiz-Example-Pack)，依赖管理与构建使用 [Pakku](https://github.com/juraj-hrivnak/Pakku)。
+
+## 许可证
+
+本模板自身的内容采用 [CC0 1.0 Universal](LICENSE)。第三方 Mod、工具和素材遵循各自许可证。
