@@ -1,12 +1,13 @@
 import {inspectZip} from './archive.mjs';
 import {digest} from './prepare.mjs';
+import {isTargetId} from './workspace.mjs';
 
 export function repository(value) {
   if(!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(value??'')||value.split('/').some(s=>s==='.'||s==='..'))throw new Error('需要明确 --repo owner/repository');return value;
 }
 export function releaseTag(tag,targetId) {
-  const m=tag?.match(/^release\/([a-z0-9][a-z0-9_-]*)\/v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$/);
-  if(!m||m[1]!==targetId||m[2].includes('..'))throw new Error('Release Tag 必须为 release/<target>/v<semver>');return m[2];
+  const m=typeof tag==='string'?tag.match(/^release\/([^/]+)\/v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$/):null;
+  if(!m||tag.trim()!==tag||!isTargetId(m[1])||m[1]!==targetId||m[2].includes('..'))throw new Error('Release Tag 必须为 release/<target>/v<semver>');return m[2];
 }
 export function githubClient(options={}) {
   const request=options.fetch??fetch,token=options.token??process.env.GH_TOKEN??process.env.GITHUB_TOKEN;

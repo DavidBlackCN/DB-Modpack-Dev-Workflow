@@ -8,10 +8,11 @@ import {sourceSnapshot,digest} from '../tools/lib/prepare.mjs';
 import {deploy,recover} from '../tools/lib/deploy.mjs';
 import {apply,verifyBundle} from '../tools/lib/apply.mjs';
 import {inspectZip,inspectArchive} from '../tools/lib/archive.mjs';
-import {downloadArtifact,githubClient} from '../tools/lib/github.mjs';
+import {downloadArtifact,githubClient,releaseTag} from '../tools/lib/github.mjs';
 import {affectedTargets,validateTag,ciPlan} from '../tools/ci.mjs';
 import {publishDraft} from '../tools/release.mjs';
 import {atomicJson,localPath} from '../tools/lib/runtime-fs.mjs';
+import {isTargetId} from '../tools/lib/workspace.mjs';
 import {validateExportOutput} from '../tools/lib/pakku.mjs';
 
 async function bundleFor(f,edit=()=>{}) {
@@ -146,4 +147,47 @@ test('Draft Release 模拟创建上传只允许草稿，已存在的正式/草�
   const options={repo:'owner/repo',tag:'release/example/v0.1.0',directory:'.work/bundle',publish:true,fetch:mock,token:'test-only'};
   assert.equal((await publishDraft(f.root,options)).draft,true);assert.equal(calls.filter(c=>c[0].startsWith('https://uploads')).length,3);
   for(const draft of [true,false])await assert.rejects(publishDraft(f.root,{...options,fetch:async(url,init)=>String(url).includes('/releases/tags/')?Response.json({id:8,draft}):mock(url,init)}),/拒绝覆盖/);
+});
+
+
+test('Release Tag 与 Workspace 共用 Target ID 规则',()=>{
+  for(const id of ['fabric-1.21.1','neoforge-1.21.1','example','a-b.2']) {
+    assert.equal(isTargetId(id),true);
+    assert.equal(releaseTag(`release/${id}/v0.1.0`,id),'0.1.0');
+    assert.equal(releaseTag(`release/${id}/v0.1.0-rc.1`,id),'0.1.0-rc.1');
+  }
+  for(const id of ['bad_id','UPPER','../a','a/b','','a\n']) {
+    assert.equal(isTargetId(id),false);
+    assert.throws(()=>releaseTag(`release/${id}/v0.1.0`,id));
+  }
+  for(const tag of ['release/fabric-1.21.1/v0.1.0/extra','release/fabric-1.21.1/v0.1.0\n','release/fabric-1.21.1/v0.1.0-..'])assert.throws(()=>releaseTag(tag,'fabric-1.21.1'));
+  assert.throws(()=>releaseTag('release/fabric-1.21.1/v0.1.0','neoforge-1.21.1'));
+});
+
+for(const id of ['fabric-1.21.1','neoforge-1.21.1'])test(`${id} 支持 Tag 校验、Draft 上传和远端 Apply`,async t=>{
+  const f=await setup(t);f.target.id=id;f.runtime.targetId=id;
+  await atomicJson(path.join(f.root,'workspace.json'),{targets:[f.target]});
+  await atomicJson(await localPath(f.root,'runtimes.json'),{schema:1,bindings:[f.runtime]});
+  const tag=`release/${id}/v0.1.0`,bundle=await bundleFor(f);
+  assert.equal((await validateTag(f.root,tag)).target.id,id);
+  await assert.rejects(validateTag(f.root,`release/${id}/v9.0.0`),/版本不符/);
+  const files={[bundle.name]:bundle.bytes,'build-report.json':bundle.reportBytes,SHA256SUMS:bundle.sumsBytes};
+  const assets=Object.entries(files).map(([name,bytes],i)=>({id:i+1,name,digest:'sha256:'+digest(bytes)}));
+  let created=false,uploads=0;
+  const fetch=async(url,options={})=>{
+    const u=String(url);
+    if(u.includes('/git/ref/tags/'))return Response.json({object:{type:'commit',sha:'a'.repeat(40)}});
+    if(u.includes('/releases/tags/'))return created?Response.json({tag_name:tag,draft:true,assets}):new Response('',{status:404});
+    if(u.endsWith('/releases')){const body=JSON.parse(options.body);assert.equal(body.tag_name,tag);assert.equal(body.draft,true);created=true;return Response.json({id:9,draft:true});}
+    if(u.startsWith('https://uploads.github.com/')){uploads++;return Response.json({digest:'sha256:'+digest(options.body)});}
+    const match=u.match(/\/releases\/assets\/(\d+)$/);if(match)return new Response(files[assets[Number(match[1])-1].name]);
+    throw new Error('unexpected request');
+  };
+  assert.equal((await publishDraft(f.root,{repo:'owner/repo',tag,directory:'.work/bundle',publish:true,fetch,token:'test-only'})).draft,true);
+  assert.equal(uploads,3);
+  const before=await snapshot(f.base),options={repo:'owner/repo',release:tag,fetch,...stopped};
+  await apply(f.root,f.runtime,f.target,options);assert.deepEqual(await snapshot(f.base),before);
+  await apply(f.root,f.runtime,f.target,{...options,confirm:true,sha256:digest(bundle.bytes)});
+  const baseline=JSON.parse(await fs.readFile(await localPath(f.root,`runtimes/${f.runtime.key}/baseline.json`)));
+  assert.equal(baseline.targetId,id);assert.equal(baseline.source.tag,tag);
 });

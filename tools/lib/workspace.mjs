@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));
+export const isTargetId = value => typeof value === 'string' && /^[a-z0-9][a-z0-9.-]*$/.test(value) && value.trim() === value;
 export function relativePath(value) {
   if (typeof value !== 'string' || !value || /[\\:\x00-\x1f]/u.test(value) || value.startsWith('/') || value.split('/').some(x => !x || x === '.' || x === '..' || /[. ]$/.test(x))) {
     throw new Error(`不安全的相对路径: ${value}`);
@@ -32,7 +33,7 @@ export async function loadWorkspace(root) {
   if (!w || Object.keys(w).some(k => !['targets', 'defaultTarget'].includes(k)) || !Array.isArray(w.targets) || !w.targets.length) throw new Error('workspace Schema: targets 必须是非空数组');
   const ids = new Set(), paths = [];
   for (const t of w.targets) {
-    if (!t || Object.keys(t).some(k => !['id','path','artifacts'].includes(k)) || !/^[a-z0-9][a-z0-9.-]*$/.test(t.id ?? '') || ids.has(t.id)) throw new Error('Target ID 无效或重复');
+    if (!t || Object.keys(t).some(k => !['id','path','artifacts'].includes(k)) || !isTargetId(t.id) || ids.has(t.id)) throw new Error('Target ID 无效或重复');
     ids.add(t.id);
     const absolute = await safePath(root, t.path);
     if (!(await fs.stat(absolute)).isDirectory()) throw new Error(`Target 不存在: ${t.path}`);
