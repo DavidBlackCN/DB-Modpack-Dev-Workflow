@@ -35,6 +35,10 @@ export async function ciPlan(root,event,eventName) {
   }
   return {targets:affectedTargets(workspace,files,all),base:all?'':base,head,files};
 }
+export async function assertClean(root) {
+  const result=requireSuccess(await run('git',['status','--porcelain','--untracked-files=all'],{cwd:root,capture:true}));
+  if(result.stdout.trim())throw new Error(`检查产生了源文件改动或未跟踪文件：\n${result.stdout}`);
+}
 async function main() {
   const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),command=process.argv[2];
   const emit=async values=>{console.log(JSON.stringify(values,null,2));if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,Object.entries(values).map(([k,v])=>`${k}=${typeof v==='string'?v:JSON.stringify(v)}\n`).join(''));};
@@ -53,11 +57,13 @@ async function main() {
     if(result.report.dirty||!result.report.git)throw new Error('CI/Release 构建必须来自干净 Git 提交');
     if(result.report.uncollected.length)throw new Error('存在未收集产物；请明确配置 artifacts 后重新构建');
     await emit({output:path.relative(root,result.out).split(path.sep).join('/')});
+  }else if(command==='clean') {
+    await assertClean(root);
   }else if(command==='lint') {
     const args=['tools/lint-commits.mjs','--to',process.env.COMMIT_HEAD??'HEAD'];
     if(process.env.COMMIT_BASE)args.push('--from',process.env.COMMIT_BASE);
     else args.push('--from',requireSuccess(await run('git',['rev-list','--max-parents=0','HEAD'],{cwd:root,capture:true})).stdout.trim().split('\n')[0]);
     requireSuccess(await run(process.execPath,args,{cwd:root}));
-  }else throw new Error('ci.mjs plan|tag|build|lint');
+  }else throw new Error('ci.mjs plan|tag|build|lint|clean');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(e=>{console.error(e.message);process.exitCode=1;});

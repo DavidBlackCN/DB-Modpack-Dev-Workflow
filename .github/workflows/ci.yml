@@ -2,12 +2,13 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: ['**']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A same-repository PR and its branch push share a group; newer runs replace older ones.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   plan:
@@ -65,7 +66,7 @@ jobs:
       - run: pnpm run mp -- bootstrap
       - run: pnpm run mp -- check --all
       - name: Ensure source unchanged
-        run: git diff --exit-code
+        run: node tools/ci.mjs clean
   build:
     needs: plan
     if: needs.plan.outputs.has_targets == 'true'
