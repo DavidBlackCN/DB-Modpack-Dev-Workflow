@@ -119,3 +119,19 @@ test('Status 只读输出待回收、部署来源，不输出完整系统路径'
   assert.ok(!JSON.stringify(s).includes(f.gameDir));assert.deepEqual(await snapshot(f.base),before);
   await assert.rejects(acceptDependencies(f.root,f.target,{confirm:true}),/accept-hash/);
 });
+
+
+test('轻量 Status 只读本地元数据，游戏目录离线时也不扫描或报告虚假的零变更',async t=>{
+  const f=await deployed(t);
+  await fs.rename(f.gameDir,f.gameDir+'-offline');
+  const before=await snapshot(f.base),workspace={targets:[f.target]};
+  const light=await status(f.root,workspace,{light:true});
+  assert.equal(light.light,true);assert.equal(light.selected,f.target.id);
+  assert.equal(light.bindings[0].id,f.runtime.id);assert.equal(light.targets[0].id,f.target.id);
+  assert.equal(light.runtimes[0].deployed,true);assert.equal(light.runtimes[0].sourceKind,'local');
+  assert.equal(light.runtimes[0].version,'0.1.0');assert.equal(light.runtimes[0].error,undefined);
+  assert.equal(light.runtimes[0].pendingCollect,undefined);assert.equal(light.runtimes[0].conflicts,undefined);
+  assert.ok(!JSON.stringify(light).includes(f.gameDir));
+  assert.match((await status(f.root,workspace)).runtimes[0].error,/检查失败/);
+  assert.deepEqual(await snapshot(f.base),before);
+});

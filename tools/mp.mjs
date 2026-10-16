@@ -54,7 +54,7 @@ pnpm run mp -- <命令>
        --confirm --stopped [--file mods/<额外或禁用 JAR>]
                                备份后修复受管依赖；仅点选额外 JAR 移入备份
   dev <name> --stopped         Deploy 后显示手动启动提示
-  status                      查看本机选择、部署来源、待回收及未提交改动
+  status [--light]            完整状态；--light 仅读取选择、绑定和部署元数据
   apply <name> --file <包.mrpack> [--dry-run]
        或 --repo owner/repo --run <Run ID>
        或 --repo owner/repo --release release/<target>/v<version>
@@ -80,20 +80,20 @@ try {
         if (arg === '--target') { if (explicit) throw new Error('重复 --target'); explicit = value; }
         else {const key={'--java':'java','--launcher':'launcher','--game-dir':'gameDir','--version-dir':'versionDir','--file':'file','--source':'source','--operation':'operation','--project':'project','--candidate':'candidate','--accept-hash':'acceptHash','--run':'run','--repo':'repo','--release':'release','--sha256':'sha256'}[arg];if(options[key])throw new Error(`重复 ${arg}`);options[key]=value;}
       } else if (arg === '--all' && command === 'check') all = true;
-      else if (['--dry-run','--confirm-game-dir','--stopped','--adopt-existing','--json','--confirm','--delete'].includes(arg)) options[{'--dry-run':'dryRun','--confirm-game-dir':'confirmGameDir','--stopped':'stopped','--adopt-existing':'adoptExisting','--json':'json','--confirm':'confirm','--delete':'delete'}[arg]]=true;
+      else if (['--dry-run','--confirm-game-dir','--stopped','--adopt-existing','--json','--light','--confirm','--delete'].includes(arg)) options[{'--dry-run':'dryRun','--confirm-game-dir':'confirmGameDir','--stopped':'stopped','--adopt-existing':'adoptExisting','--json':'json','--light':'light','--confirm':'confirm','--delete':'delete'}[arg]]=true;
       else if (arg.startsWith('-')) throw new Error(`未知参数 ${arg}`);
       else positional.push(arg);
     }
     if (all && explicit) throw new Error('--all 与 --target 不能同时使用');
     if (!['bootstrap','doctor','targets','use','list','add','remove','update','check','build','pakku','prepare','bind','runtimes','unbind','deploy','recover','changes','collect','deps-review','deps-accept','restore-deps','dev','status','apply'].includes(command)) throw new Error(`未知命令 ${command}，运行 mp help`);
-    const allowed = {launcher:['bind'],gameDir:['bind'],versionDir:['bind'],dryRun:['bind','deploy','dev','apply'],confirmGameDir:['bind'],stopped:['deploy','recover','dev','collect','restore-deps','apply'],adoptExisting:['deploy','dev','apply'],json:['changes','collect','status'],confirm:['collect','deps-accept','restore-deps','apply'],delete:['collect'],file:['collect','restore-deps','apply'],source:['collect'],operation:['deps-review'],project:['deps-review'],candidate:['deps-accept'],acceptHash:['deps-accept'],run:['apply'],repo:['apply'],release:['apply'],sha256:['apply']};
+    const allowed = {launcher:['bind'],gameDir:['bind'],versionDir:['bind'],dryRun:['bind','deploy','dev','apply'],confirmGameDir:['bind'],stopped:['deploy','recover','dev','collect','restore-deps','apply'],adoptExisting:['deploy','dev','apply'],json:['changes','collect','status'],light:['status'],confirm:['collect','deps-accept','restore-deps','apply'],delete:['collect'],file:['collect','restore-deps','apply'],source:['collect'],operation:['deps-review'],project:['deps-review'],candidate:['deps-accept'],acceptHash:['deps-accept'],run:['apply'],repo:['apply'],release:['apply'],sha256:['apply']};
     for (const key of Object.keys(options)) if (allowed[key] && !allowed[key].includes(command)) throw new Error(`${command} 不支持 ${key}`);
     const expected = ['use','add','remove','bind','unbind','deploy','recover','changes','collect','deps-review','deps-accept','restore-deps','dev','apply'].includes(command) ? 1 : 0;
     if (positional.length !== expected && !(command === 'update' && positional.length <= 1)) throw new Error(`${command} 参数数量错误`);
     const w = await loadWorkspace(root);
     if (explicit && !w.targets.some(t => t.id === explicit)) throw new Error(`未知 Target: ${explicit}`);
     options.report = value => console.log(JSON.stringify(value,null,2));
-    if(command==='status')options.report(await status(root,w));
+    if(command==='status')options.report(await status(root,w,options));
     else if(['changes','collect','deps-review','deps-accept','restore-deps'].includes(command)) {
       const runtime=await getRuntime(root,positional[0]);
       if(explicit && explicit!==runtime.targetId)throw new Error('--target 与 Runtime 绑定不符');

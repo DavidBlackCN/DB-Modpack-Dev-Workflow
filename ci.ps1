@@ -196,9 +196,9 @@ function Query-Mp([string[]] $Arguments) {
     return $result.Records[-1]
 }
 function Refresh-Selection {
-    $script:State = Query-Mp @('status','--json')
-    $script:Targets = @(Query-Mp @('targets'))
-    $script:Bindings = @((Query-Mp @('runtimes')).bindings)
+    $script:State = Query-Mp @('status','--light','--json')
+    $script:Targets = @($script:State.targets)
+    $script:Bindings = @($script:State.bindings)
     $script:TargetChoice = $script:State.selected
     $available = @($script:Bindings | Where-Object targetId -EQ $script:TargetChoice)
     if ($script:RuntimeChoice -notin @($available.id)) { $script:RuntimeChoice = $null }

@@ -19,7 +19,7 @@ const out=x=>console.log(JSON.stringify(x,null,2));
 const id=args[5];
 if(command===spec.fail){console.error('fixture failure');process.exit(37);}
 switch(command){
-case 'status':out({selected:spec.selected,gitDirty:true,runtimes:[]});break;
+case 'status':out({selected:spec.selected,gitDirty:true,runtimes:[],targets:spec.targets.map(id=>({id})),bindings:spec.bindings});break;
 case 'targets':out(spec.targets.map(id=>({id,path:'packs/'+id,artifacts:['modrinth']})));break;
 case 'runtimes':out({bindings:spec.bindings});break;
 case 'use':spec.selected=id;fs.writeFileSync(process.env.MENU_SPEC,JSON.stringify(spec));out({selected:id});break;
@@ -63,9 +63,9 @@ test('纯菜单导航不重复查询状态，手动刷新和失败操作后重�
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=await f.commands();
   // Initial load, explicit refresh, and refresh after the failed operation.
-  for(const command of ['status','targets','runtimes']) {
-    assert.equal(calls.filter(a=>a[0]===command).length,3,JSON.stringify(calls));
-  }
+  assert.equal(calls.filter(a=>a[0]==='status').length,3,JSON.stringify(calls));
+  assert.ok(calls.filter(a=>a[0]==='status').every(a=>a.includes('--light')));
+  assert.ok(!calls.some(a=>['targets','runtimes'].includes(a[0])));
   assert.equal(calls.filter(a=>a[0]==='doctor').length,1);
   assert.match(result.stdout,/fixture failure/);
 });
