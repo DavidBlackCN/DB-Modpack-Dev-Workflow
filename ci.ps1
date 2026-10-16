@@ -207,7 +207,9 @@ function Refresh-Selection {
 function Choose-Item($Items, [string] $Label) {
     if (-not $Items.Count) { throw "没有可选的 $Label。" }
     while ($true) {
-        for ($i=0; $i -lt $Items.Count; $i++) { Write-Host "$($i+1). $($Items[$i].id)" }
+        Show-Page "📋 选择 $Label"
+        for ($i=0; $i -lt $Items.Count; $i++) { Write-Host "  [$($i+1)] 📦 $($Items[$i].id)" }
+        Write-Host "`n  [0] ↩️ 返回" -ForegroundColor DarkGray
         $choice=Read-Choice "$Label（0 返回）"
         if ($choice -eq '0') { return $null }
         $number=0
@@ -318,7 +320,8 @@ function Invoke-Collect([string] $Choice) {
     if ($Choice -eq '2') { return }
     $forward+=@('--file',$file)
     if ($item.state -eq 'candidate') {
-        $location=Read-Choice '新增配置来源：1 客户端覆盖，2 公共覆盖，0 取消'
+        Write-Host "`n  [1] 🖥️ 客户端覆盖`n  [2] 📦 公共覆盖`n  [0] ↩️ 取消"
+        $location=Read-Choice '选择新增配置来源'
         if ($location -eq '0') { return }
         $prefix=@{'1'='.pakku/client-overrides/';'2'='.pakku/overrides/'}[$location]
         if (-not $prefix) { throw '来源选择无效。' }
@@ -389,6 +392,7 @@ function Invoke-Git([string] $Choice) {
     Write-Host '操作成功。' -ForegroundColor Green
 }
 function Invoke-Advanced {
+    Show-Page '🛠️ Pakku 高级操作' '逐个输入原生参数，空行结束；输入 0 取消。'
     Require-Target
     Write-Host 'Pakku 原生命令可能修改工程。逐个输入参数，不需要 shell 引号；空行结束，0 取消。'
     $native=@()
@@ -405,33 +409,53 @@ function Invoke-Advanced {
         Write-Host '操作成功。' -ForegroundColor Green
     }
 }
+function Show-Page([string] $Title, [string] $Description) {
+    Write-Host "`n────────────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host '  DB Modpack Dev Workflow v2' -ForegroundColor Cyan
+    Write-Host "  $Title" -ForegroundColor Cyan
+    Write-Host '────────────────────────────────────────────' -ForegroundColor DarkGray
+    $runtimeLabel=if ($script:RuntimeChoice) { $script:RuntimeChoice } elseif (@($script:Bindings | Where-Object targetId -EQ $script:TargetChoice).Count) { '未选择' } else { '未绑定' }
+    $gitState=if ($null -eq $script:State.gitDirty) { '未知' } elseif ($script:State.gitDirty) { '有未提交改动' } else { '干净' }
+    Write-Host "  🎯 目标  $($script:TargetChoice ?? '未选择')"
+    Write-Host "  🎮 实例  $runtimeLabel"
+    Write-Host "  🌿 Git   $gitState"
+    if ($Description) { Write-Host "`n  $Description" -ForegroundColor DarkGray }
+    Write-Host ''
+}
 function Show-Menu {
+    $titles=@('🏠 主菜单','🚀 开发测试','🧩 Mod / 依赖管理','🎮 启动器实例管理','📥 查看与回收游戏修改','📦 构建整合包','📲 应用 CI / Release 构建','🔍 项目与环境检查','🌿 Git 提交','🛠️ Pakku 高级操作')
+    $hints=@('输入编号进入功能页。','先预览变化，再确认部署；游戏须保持关闭。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。')
     $menus=@{
-        '1'=@('部署到当前实例','准备并预览部署变化','切换测试实例','切换 Target','恢复失败部署（Recover）')
-        '2'=@('添加 Mod','删除 Mod','更新指定 Mod','更新全部 Mod','查看 Mod 列表','审查并接受本地依赖变化','恢复正式依赖')
-        '3'=@('查看已绑定实例','绑定 PCL2 实例','绑定 HMCL 实例','切换当前实例','解除绑定')
-        '4'=@('查看全部变化','查看指定配置差异','回收指定配置','审查新增配置候选','查看依赖偏离')
-        '5'=@('构建当前 Target','构建所有 Target','查看最近构建结果')
-        '6'=@('应用本地 MRPACK','应用 GitHub Actions Run','应用 GitHub Release')
-        '7'=@('检查当前 Target','检查全部 Target','环境诊断','安装 / 校验 Pakku','查看工作区状态')
-        '8'=@('查看 Git 状态','查看 Git Diff','交互式提交','校验提交信息')
+        '1'=@('🚀 部署到当前实例','👀 准备并预览部署变化','🎮 切换测试实例','🎯 切换目标','🛟 恢复失败部署（Recover）')
+        '2'=@('➕ 添加 Mod','➖ 删除 Mod','🔄 更新指定 Mod','🔄 更新全部 Mod','📋 查看 Mod 列表','🔎 审查并接受本地依赖变化','↩️ 恢复正式依赖')
+        '3'=@('📋 查看已绑定实例','🔗 绑定 PCL2 实例','🔗 绑定 HMCL 实例','🎮 切换当前实例','🔓 解除绑定')
+        '4'=@('📋 查看全部变化','🔎 查看指定配置差异','📥 回收指定配置','🆕 审查新增配置候选','🧩 查看依赖偏离')
+        '5'=@('📦 构建当前目标','📦 构建所有目标','📂 查看最近构建结果')
+        '6'=@('📂 应用本地 MRPACK','⚙️ 应用 GitHub Actions Run','🏷️ 应用 GitHub Release')
+        '7'=@('🔍 检查当前目标','🔍 检查全部目标','🩺 环境诊断','📥 安装 / 校验 Pakku','📋 查看工作区状态')
+        '8'=@('🌿 查看 Git 状态','🔎 查看 Git Diff','📝 交互式提交','✅ 校验提交信息')
     }
     $section=''
     while ($true) {
         try { Refresh-Selection } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
-        $gitState=if ($null -eq $script:State.gitDirty) { 'unknown' } elseif ($script:State.gitDirty) { 'dirty' } else { 'clean' }
-        Write-Host "`nDB Modpack Dev Workflow v2" -ForegroundColor Cyan
-        $runtimeLabel=if ($script:RuntimeChoice) { $script:RuntimeChoice } elseif (@($script:Bindings | Where-Object targetId -EQ $script:TargetChoice).Count) { '未选择' } else { '未绑定' }
-        Write-Host "Target: $($script:TargetChoice ?? '未选择') | Runtime: $runtimeLabel | Git: $gitState"
+        Show-Page $titles[[int]$section] $hints[[int]$section]
         if (-not $section) {
-            Write-Host "1. 开发测试`n2. Mod / 依赖管理`n3. 启动器实例管理`n4. 查看与回收游戏修改`n5. 构建整合包`n6. 应用 CI / Release 构建`n7. 项目与环境检查`n8. Git 提交`n9. Pakku 高级操作`n0. 退出"
+            for ($i=1; $i -le 9; $i++) {
+                if ($i -in @(1,5,7)) {
+                    $group=@{1='开发与同步';5='构建与应用';7='检查与维护'}[$i]
+                    Write-Host "  ── $group ──" -ForegroundColor DarkGray
+                }
+                Write-Host "  [$i] $($titles[$i])"
+                if ($i -in @(4,6)) { Write-Host '' }
+            }
         } else {
             $items=$menus[$section]
-            for ($i=0; $i -lt $items.Count; $i++) { Write-Host "$($i+1). $($items[$i])" }
-            Write-Host '0. 返回上一级'
+            for ($i=0; $i -lt $items.Count; $i++) { Write-Host "  [$($i+1)] $($items[$i])" }
         }
-        Write-Host 'd. 查看上次操作的完整输出'
-        $choice=Read-Choice '选择'
+        Write-Host "`n  [d] 📄 查看上次操作的完整输出" -ForegroundColor DarkGray
+        $backLabel=if ($section) { '返回上一级' } else { '退出' }
+        Write-Host "  [0] ↩️ $backLabel`n" -ForegroundColor DarkGray
+        $choice=Read-Choice '请选择'
         if ($choice -eq '0') { if (-not $section) { return }; $section=''; continue }
         if ($choice -eq 'd') { Write-Host ($script:LastResult.Raw ?? '暂无操作输出。'); continue }
         try {

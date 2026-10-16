@@ -59,7 +59,7 @@ const options={skip:pwsh?false:'未安装 PowerShell 7.3+，菜单测试未执�
 test('菜单无绑定可启动退出，无效选择返回菜单，帮助不依赖 pnpm',options,async t=>{
   const f=await fixture(t,{bindings:[]});
   const result=await f.execute([], 'wrong\n0\n');assert.equal(result.code,0,result.stdout+result.stderr);
-  assert.match(result.stdout,/未绑定/);assert.match(result.stdout,/dirty/);assert.match(result.stdout,/请输入菜单编号/);
+  assert.match(result.stdout,/未绑定/);assert.match(result.stdout,/有未提交改动/);assert.match(result.stdout,/请输入菜单编号/);
   await fs.unlink(path.join(f.bin,'pnpm.ps1'));
   assert.equal((await f.execute(['help'])).code,0);
   const missing=await f.execute(['status']);assert.equal(missing.code,1);assert.match(missing.stdout,/pnpm/);
