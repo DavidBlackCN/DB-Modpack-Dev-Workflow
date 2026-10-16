@@ -57,7 +57,7 @@ export async function pakku(root, targetPath, args, options = {}) {
   const t = await verifiedTool(root);
   // v1.5.0 Glob.walk mixes relative paths with workingPath. Absolute workingPath breaks export.
   // Set the actual cwd explicitly, then pass '.' to retain Pakku's native relative-path semantics.
-  return run(options.java ?? process.env.MP_JAVA ?? 'java', ['-Dfile.encoding=UTF-8', '-jar', t.jar, '--working-path', '.', ...args], { ...options, cwd: targetPath });
+  return (options.execute ?? run)(options.java ?? process.env.MP_JAVA ?? 'java', ['-Dfile.encoding=UTF-8', '-jar', t.jar, '--working-path', '.', ...args], { ...options, cwd: targetPath });
 }
 export function requireSuccess(result) {
   if (result.code !== 0) throw Object.assign(new Error(`工具退出码 ${result.code}: ${result.stderr ?? ''}`), { exitCode: result.code });

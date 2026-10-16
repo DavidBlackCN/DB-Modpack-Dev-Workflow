@@ -111,3 +111,20 @@ pnpm run mp -- recover hmcl-dev --stopped
 如果进程被强制结束后提示操作锁占用，检查报错给出的锁文件和进程 ID。仅在确认原进程已经退出、没有同步操作运行时移走该锁，再执行 recover。
 
 应用 CI 或发布包见[构建与发布](RELEASE.md)。应用其他提交的包后，回收可能出现来源冲突；先对齐并检查本地源，再部署。一个实际实例宜始终由同一份项目维护。
+
+## 导入实例新增依赖
+
+“Mod / 依赖管理 → 从实例导入新增依赖”用于将测试实例中新增的 Mod 纳入 Pakku。它与回收配置的 Collect 分开：先列出未匹配当前锁文件的 JAR，点选一个文件，Pakku 按哈希联网识别，展示项目、全部新增依赖和锁文件差异，最后确认写入。可重复操作导入其他 Mod。
+
+```powershell
+pnpm run mp -- import-deps hmcl-dev --json
+pnpm run mp -- import-deps hmcl-dev --file mods/example.jar --sha256 <扫描结果中的哈希> --json
+pnpm run mp -- import-deps hmcl-dev --candidate <候选ID> --accept-hash <候选锁文件哈希> --confirm
+git diff -- packs/
+```
+
+识别在 `.work/` 副本调用 Pakku 1.5.0 的 `sync --additions`。确认前不修改正式源；确认后仅写回原生 `pakku-lock.json`，保存原锁文件备份，不复制 JAR 到源工程、不修改游戏目录。导入可能包含 Pakku 自动解析的依赖，须一并审查许可和差异。源文件、绑定或所选 JAR 在审查后变化时，需要重新识别。
+
+当前仅识别默认 `mods/` 根目录下启用的 JAR，单文件上限 256 MiB；禁用文件和子目录文件跳过。已有项目的版本更换、无法被平台识别的本地 Mod，以及会改动已有依赖记录的候选，不在本流程中自动接受。未知来源需自行核实后通过常规 Pakku 入口管理。识别依赖联网及对应平台可用性；本模板实际验证的是 Modrinth。
+
+绑定名称仅允许小写字母、数字、`-`、`_`，且以字母或数字开头，例如 `pcl2-debug`、`hmcl-dev`。目标名可以含句点，实例绑定名不能含句点；菜单会在输入时提示重新填写。

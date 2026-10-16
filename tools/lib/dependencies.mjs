@@ -10,7 +10,7 @@ import { replaceSource } from './collect.mjs';
 import { localPath, atomicJson, optionalJson, lockOperation, runtimeKey, fileInfo, managedPath } from './runtime-fs.mjs';
 import { checkJournal, validateBaseline } from './deploy.mjs';
 import { assertStopped } from './processes.mjs';
-import { verifyRuntime } from './runtimes.mjs';
+import { verifyRuntime, getRuntime } from './runtimes.mjs';
 
 export async function reviewDependencies(root,runtime,target,options={}) {
   const report=await changes(root,runtime,target);options.report?.(report);
@@ -42,6 +42,12 @@ export async function acceptDependencies(root,target,options={}) {
     for(const name of new Set([...info.source,...candidate.source]))if(name!=='pakku-lock.json' && info.hashes[name]!==candidate.hashes[name])throw new Error('候选含锁文件以外变化，拒绝接受');
     const after=await sourceBytes(candidate.dir,'pakku-lock.json');
     if(digest(after)!==record.hash||record.hash!==options.acceptHash)throw new Error('候选锁文件哈希已变化');
+    if(record.importSource) {
+      const input=record.importSource,runtime=await getRuntime(root,input.runtime);
+      if(runtime.key!==input.key||runtime.targetId!==target.id)throw new Error('导入来源绑定已变化');
+      await verifyRuntime(root,runtime,target);
+      if((await fileInfo(runtime.gameDir,input.file))?.hash!==input.hash)throw new Error('导入来源 JAR 已变化，重新识别');
+    }
     if((await sourceSnapshot(root,target)).fingerprint!==info.fingerprint)throw new Error('验证期间源已变化');
     return replaceSource(root,target,'pakku-lock.json',await sourceBytes(info.dir,'pakku-lock.json'),after,{operation:'accept-dependencies',candidate:record.id},options);
   });
