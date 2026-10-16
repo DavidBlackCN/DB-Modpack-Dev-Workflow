@@ -31,7 +31,7 @@ PR 判断整个分支的累计差异；若先前已修改包源，后续只改�
 
 预览包名为 `preview-<目标名>`，保留 14 天，包含整合包、`SHA256SUMS` 和 `build-report.json`。工具版本固定，Pakku 下载会核验 SHA-256，构建不更新依赖。
 
-工作流中的 Action 使用 `@v7` 等主版本标签，跟随同一主版本更新；Node、pnpm、Java 和 Pakku 的工具版本单独固定。Temurin 21.0.10+7 在 `setup-java` 中使用完整版本 `21.0.10+7.0.LTS`，与安装 API 的版本标识一致。
+工作流中的 Action 固定为完整 Commit SHA，行尾注释标明核对时的版本标签；更新时核对官方仓库标签指向并重新验证。Node、pnpm、Java 和 Pakku 的工具版本单独固定。Temurin 21.0.10+7 在 `setup-java` 中使用完整版本 `21.0.10+7.0.LTS`，与安装 API 的版本标识一致。
 
 默认 CI 只构建 Modrinth 目标，不提供平台 Token。使用 CurseForge 或 multiplatform 前需要调整凭据及构建流程。CI 不启动游戏，发布流程也不上传到 Modrinth 或 CurseForge。
 
