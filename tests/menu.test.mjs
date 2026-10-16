@@ -17,7 +17,7 @@ fs.appendFileSync(process.env.MENU_LOG,JSON.stringify(args)+'\n');
 const spec=JSON.parse(fs.readFileSync(process.env.MENU_SPEC));
 const out=x=>console.log(JSON.stringify(x,null,2));
 const id=args[5];
-if(command===spec.fail){console.error('fixture failure');process.exit(37);}
+if(command===spec.fail || (spec.failFile && args.includes('--file') && args.includes(spec.failFile))){console.error('fixture failure');process.exit(37);}
 switch(command){
 case 'status':out({selected:spec.selected,gitDirty:true,runtimes:[],targets:spec.targets.map(id=>({id})),bindings:spec.bindings});break;
 case 'targets':out(spec.targets.map(id=>({id,path:'packs/'+id,artifacts:['modrinth']})));break;
@@ -25,8 +25,8 @@ case 'runtimes':out({bindings:spec.bindings});break;
 case 'use':spec.selected=id;fs.writeFileSync(process.env.MENU_SPEC,JSON.stringify(spec));out({selected:id});break;
 case 'dev':case 'deploy':case 'restore-deps':out({actions:[{type:'delete',path:'config/old.json'}],conflicts:[]});break;
 case 'apply':out({action:'apply',target:spec.selected,version:'0.1.0',git:'a'.repeat(40),provenance:{kind:'file',packageHash:'b'.repeat(64)}});out({actions:[{type:'update',path:'config/a.json'}],conflicts:[]});break;
-case 'collect':case 'changes':out({managed:[{path:'config/a.json',state:spec.conflict?'conflict':'runtime-only',source:'config/a.json',runtime:spec.deleted?null:'hash',diff:{text:'--- source\n+++ runtime\n-old\n+new'}}],candidates:[{path:'config/new.json',state:'candidate',diff:{text:'+new config'}}],dependencies:[],conflicts:[]});break;
-case 'import-deps':if(args.includes('--candidate'))out({collected:'pakku-lock.json'});else if(args.includes('--file'))out({id:'import-id',hash:'c'.repeat(64),projectPath:'.work/import',diff:{text:'+recognized mod'}});else out({action:'import-deps',candidates:[{path:'mods/new.jar',hash:'a'.repeat(64)}],skipped:[]});break;
+case 'collect':case 'changes':out({managed:spec.managed??[{path:'config/a.json',state:spec.conflict?'conflict':'runtime-only',source:'config/a.json',runtime:spec.deleted?null:'hash',diff:{text:'--- source\n+++ runtime\n-old\n+new'}}],candidates:spec.candidates??[{path:'config/new.json',state:'candidate',diff:{text:'+new config'}}],dependencies:[],conflicts:[]});break;
+case 'import-deps':if(args.includes('--candidate'))out({collected:'pakku-lock.json'});else if(args.includes('--file'))out({id:'import-id',hash:'c'.repeat(64),projectPath:'.work/import',diff:{text:'+recognized mod'}});else out({action:'import-deps',candidates:spec.importItems??[{path:'mods/new.jar',hash:'a'.repeat(64)}],skipped:[]});break;
 case 'deps-review':out({id:'candidate-id',hash:'c'.repeat(64),operation:'add',project:'sodium',projectPath:'.work/candidate',diff:{text:'-old\n+new'}});break;
 case 'bind':out({action:'bind',runtime:{id,launcher:'hmcl',targetId:spec.selected,mc:'1.21.1',loaders:{fabric:'0.16.14'},gameDir:args[args.indexOf('--game-dir')+1],versionDir:'version',layout:'isolated'},existing:[]});break;
 case 'build':out({target:args[args.indexOf('--target')+1],output:'dist/output',artifacts:[{kind:'modrinth',name:'example.mrpack'}]});break;
@@ -122,22 +122,22 @@ test('多 Runtime 需明确选择并在会话内保留，真实部署需独立�
   const calls=await f.commands();assert.ok(calls.some(a=>a[0]==='dev'&&a[1]==='two'&&a.includes('--stopped')));
   assert.ok(!calls.some(a=>a[0]==='dev'&&a[1]==='one'));
 });
-test('Collect 先展示单文件差异，删除单独确认；冲突不发写入命令',options,async t=>{
+test('Collect 摘要隐藏差异，删除单独确认；冲突不发写入命令',options,async t=>{
   const f=await fixture(t,{deleted:true});
-  const result=await f.execute([], '4\n3\nconfig/a.json\ny\ny\n\n0\n0\n');
-  assert.equal(result.code,0,result.stdout+result.stderr);assert.match(result.stdout,/-old\n\+new/);
+  const result=await f.execute([], '4\n3\nspace\nenter\ny\ny\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);assert.doesNotMatch(result.stdout,/-old\n\+new/);
   assert.ok((await f.commands()).some(a=>a[0]==='collect'&&a.includes('--delete')&&a.includes('--confirm')&&a.includes('--stopped')));
   const conflict=await fixture(t,{conflict:true});
-  const blocked=await conflict.execute([], '4\n3\nconfig/a.json\n\n0\n0\n');
+  const blocked=await conflict.execute([], '4\n3\nesc\n\n0\n0\n');
   assert.match(blocked.stdout,/冲突需要先人工合并/);
   assert.ok(!(await conflict.commands()).some(a=>a.includes('--confirm')));
 });
 test('Collect 新配置需选择来源，拒绝或取消不会回收所有文件',options,async t=>{
   const f=await fixture(t);
-  const result=await f.execute([], '4\n3\nconfig/new.json\n1\ny\n\n0\n0\n');
+  const result=await f.execute([], '4\n3\ndown\nspace\nenter\n1\ny\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   assert.ok((await f.commands()).some(a=>a.includes('.pakku/client-overrides/config/new.json')&&a.includes('--confirm')));
-  const cancelled=await fixture(t);await cancelled.execute([], '4\n3\nconfig/new.json\n0\n\n0\n0\n');
+  const cancelled=await fixture(t);await cancelled.execute([], '4\n3\ndown\nspace\nenter\n0\n\n0\n0\n');
   assert.ok(!(await cancelled.commands()).some(a=>a.includes('--confirm')));
 });
 test('Apply 必须先预览，拒绝则不写；确认时转发预览哈希和停止确认',options,async t=>{
@@ -197,12 +197,12 @@ test('Runtime ID 在输入时校验，非法名称不调用 bind',options,async 
 
 test('导入点选 JAR 并确认候选哈希，取消不写正式源',options,async t=>{
   for(const answer of ['y','n']) {
-    const f=await fixture(t),result=await f.execute([],`2\n8\nmods/new.jar\ny\n${answer}\n\n0\n0\n`);
+    const f=await fixture(t),result=await f.execute([],`2\n8\nspace\nenter\ny\n${answer}\n\n0\n0\n`);
     assert.equal(result.code,0,result.stdout+result.stderr);
     const calls=(await f.commands()).filter(a=>a[0]==='import-deps');assert.equal(calls.length,answer==='y'?3:2);
     assert.ok(calls[1].includes('a'.repeat(64)));assert.ok(!calls[1].includes('--confirm'));
     if(answer==='y')assert.ok(calls[2].includes('c'.repeat(64))&&calls[2].includes('--confirm'));
-    assert.match(result.stdout,/recognized mod/);assert.equal((result.stdout.match(/按 Enter 继续/g)||[]).length,1);
+    assert.doesNotMatch(result.stdout,/recognized mod|SHA256|c{64}/);assert.equal((result.stdout.match(/按 Enter 继续/g)||[]).length,1);
   }
 });
 
@@ -227,4 +227,116 @@ test('菜单在 Enter 到达前保持结果页，不查询状态或绘制下一�
     child.on('close',code=>{clearTimeout(timeout);try{assert.equal(code,0,output);assert.equal(resumed,true);resolve();}catch(e){reject(e);}});
     child.stdin.write('7\n3\n');
   });
+});
+
+test('多选移动边界、切换、全选清空、空选和取消不会误写',options,async t=>{
+  const entries=Array.from({length:15},(_,i)=>({path:`mods/${i}.jar`,hash:'a'.repeat(64)}));
+  for(const [keys,expected] of [
+    ['up\nspace\nspace\na\nn\n'+ 'down\n'.repeat(18)+'space\nenter\n',['mods/14.jar']],
+    ['a\nn\nenter\n',[]],['a\nesc\n',[]],
+  ]) {
+    const f=await fixture(t,{importItems:entries});
+    const result=await f.execute([],`2\n8\n${keys}${expected.length?'y\ny\n':''}\n0\n0\n`);
+    assert.equal(result.code,0,result.stdout+result.stderr);
+    const calls=(await f.commands()).filter(a=>a[0]==='import-deps'&&a.includes('--file'));
+    assert.deepEqual(calls.map(a=>a[a.indexOf('--file')+1]),expected);
+    assert.match(result.stdout,/已选择/);
+  }
+  const empty=await fixture(t,{managed:[],candidates:[]});
+  const result=await empty.execute([],'4\n3\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout);assert.match(result.stdout,/没有可选文件/);
+  assert.ok(!(await empty.commands()).some(a=>a.includes('--confirm')));
+});
+
+test('Collect 多选逐项确认；摘要隐藏 diff，d 保留整个操作详情',options,async t=>{
+  const f=await fixture(t);
+  const result=await f.execute([],'4\n3\na\nenter\ny\n1\ny\n\nd\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  const writes=(await f.commands()).filter(a=>a[0]==='collect'&&a.includes('--confirm'));
+  assert.deepEqual(writes.map(a=>a[a.indexOf('--file')+1]),['config/a.json','config/new.json']);
+  assert.ok(writes.every(a=>a.includes('--stopped')));
+  assert.match(result.stdout,/回收完成 2 \/ 2/);
+  const beforeDetail=result.stdout.slice(0,result.stdout.indexOf('按 Enter 继续'));
+  assert.doesNotMatch(beforeDetail,/-old|\+new/);assert.match(result.stdout,/-old/);
+});
+
+test('Import 批量依次生成并接受候选，确认中 d 可审查且不额外暂停',options,async t=>{
+  const f=await fixture(t,{importItems:[{path:'mods/a.jar',hash:'a'.repeat(64)},{path:'mods/b.jar',hash:'b'.repeat(64)}]});
+  const result=await f.execute([],'2\n8\na\nenter\ny\nd\ny\ny\ny\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  const calls=(await f.commands()).filter(a=>a[0]==='import-deps');
+  assert.equal(calls.length,5);
+  assert.ok(calls[1].includes('mods/a.jar')&&calls[2].includes('--candidate'));
+  assert.ok(calls[3].includes('mods/b.jar')&&calls[4].includes('--candidate'));
+  assert.match(result.stdout,/recognized mod/);assert.match(result.stdout,/导入完成 2 \/ 2/);
+  assert.equal((result.stdout.match(/按 Enter 继续/g)||[]).length,1);
+});
+
+const gitProbe=spawnSync('git',['--exec-path'],{encoding:'utf8'});
+const gitOptions={skip:!pwsh?options.skip:gitProbe.status===0?false:'未安装 Git'};
+async function gitFixture(t) {
+  const f=await fixture(t);
+  const git=(...args)=>{const r=spawnSync('git',args,{cwd:f.root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout;};
+  git('init','-q');git('config','user.name','Menu Test');git('config','user.email','menu@example.invalid');
+  await fs.writeFile(path.join(f.root,'.gitignore'),'ci.ps1\nbin/\nmock.mjs\nspec.json\ncalls.jsonl\n');
+  for(const name of ['a.txt','b.txt','delete.txt','old.txt'])await fs.writeFile(path.join(f.root,name),name+'\n');
+  git('add','--','.gitignore','a.txt','b.txt','delete.txt','old.txt');git('commit','-qm','fixture');
+  const execute=input=>f.execute([],input,{PATH:f.bin+path.delimiter+process.env.PATH});
+  return {...f,git,execute};
+}
+
+test('Git 多选只暂存选中文件，支持中文空格、特殊字符、删除与重命名',gitOptions,async t=>{
+  const f=await gitFixture(t);
+  await fs.writeFile(path.join(f.root,'a.txt'),'modified\n');
+  await fs.writeFile(path.join(f.root,'b.txt'),'not selected\n');
+  await fs.unlink(path.join(f.root,'delete.txt'));
+  f.git('mv','old.txt','中文 空格[1].txt');
+  await fs.writeFile(path.join(f.root,'-literal[1].txt'),'new\n');
+  // sorted status: a, b, delete, rename, then untracked; toggle b off after selecting all.
+  const result=await f.execute('8\n5\na\ndown\nspace\nenter\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  const staged=f.git('diff','--cached','--name-only','--no-renames','-z').split('\0').filter(Boolean).sort();
+  assert.deepEqual(staged,['-literal[1].txt','a.txt','delete.txt','old.txt','中文 空格[1].txt'].sort());
+  assert.match(f.git('diff','--name-only'),/b.txt/);
+});
+
+test('Git 提交拒绝未选择的已暂存文件；取消及空选保持索引',gitOptions,async t=>{
+  for(const keys of ['space\nenter\n','a\nesc\n','enter\n']) {
+    const f=await gitFixture(t);
+    await fs.writeFile(path.join(f.root,'a.txt'),'modified a\n');
+    await fs.writeFile(path.join(f.root,'b.txt'),'modified b\n');f.git('add','--','b.txt');
+    const before=f.git('diff','--cached');
+    const result=await f.execute(`8\n3\n${keys}\n0\n0\n`);
+    assert.equal(result.code,0,result.stdout+result.stderr);
+    assert.equal(f.git('diff','--cached'),before);
+    assert.ok(!(await f.calls()).some(a=>a.join(' ')==='run commit'));
+  }
+});
+
+test('Git 选择文件后调用既有 cz-git 脚本',gitOptions,async t=>{
+  const f=await gitFixture(t);await fs.writeFile(path.join(f.root,'a.txt'),'modified\n');
+  const result=await f.execute('8\n3\nspace\nenter\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  assert.ok((await f.calls()).some(a=>a.join(' ')==='run commit'),result.stdout);
+  assert.equal(f.git('diff','--cached','--name-only').trim(),'a.txt');
+});
+
+test('批量导入中途失败即停止，保留已完成数量与完整详情',options,async t=>{
+  const f=await fixture(t,{failFile:'mods/b.jar',importItems:['a','b','c'].map(n=>({path:`mods/${n}.jar`,hash:'a'.repeat(64)}))});
+  const result=await f.execute([],'2\n8\na\nenter\ny\ny\ny\n\nd\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  const calls=(await f.commands()).filter(a=>a[0]==='import-deps');
+  assert.equal(calls.length,4);assert.ok(!calls.some(a=>a.includes('mods/c.jar')));
+  assert.match(result.stdout,/导入完成 1 \/ 3/);assert.match(result.stdout,/fixture failure/);
+  assert.match(result.stdout,/recognized mod/);
+});
+
+test('Collect 排除二进制与冲突，空的 Import 无选择和写入',options,async t=>{
+  const f=await fixture(t,{managed:[{path:'config/binary',state:'runtime-only',diff:{binary:true}}],candidates:[{path:'config/new',state:'candidate',binary:true}]});
+  const result=await f.execute([],'4\n3\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout);assert.match(result.stdout,/没有可选文件/);
+  assert.ok(!(await f.commands()).some(a=>a.includes('--confirm')));
+  const empty=await fixture(t,{importItems:[]}),other=await empty.execute([],'2\n8\n\n0\n0\n');
+  assert.equal(other.code,0,other.stdout);assert.match(other.stdout,/没有需要识别/);
+  assert.equal((await empty.commands()).filter(a=>a[0]==='import-deps').length,1);
 });

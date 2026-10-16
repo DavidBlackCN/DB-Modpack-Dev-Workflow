@@ -122,11 +122,57 @@ function Read-Choice([string] $Prompt) {
     if ($null -eq $value) { throw '输入已结束；菜单已停止。' }
     return $value.Trim()
 }
-function Confirm-Action([string] $Prompt) { return (Read-Choice "$Prompt [y/N]") -ceq 'y' }
+function Confirm-Action([string] $Prompt) {
+    while ($true) {
+        $answer=Read-Choice "$Prompt [y/N，d 查看详细输出]"
+        if ($answer -eq 'd') { Write-Host $script:LastResult.Raw; continue }
+        return $answer -ceq 'y'
+    }
+}
+# Redirected input accepts key names, keeping the same state machine testable without a terminal.
+function Read-SelectionKey {
+    if ([Console]::IsInputRedirected) {
+        $key=Read-Choice '按键（up/down/space/a/n/enter/esc）'
+        if ($key -eq '') { return 'enter' }; return $key.ToLowerInvariant()
+    }
+    switch ([Console]::ReadKey($true).Key) {
+        UpArrow { 'up' }; DownArrow { 'down' }; Spacebar { 'space' }
+        A { 'a' }; N { 'n' }; Enter { 'enter' }; Escape { 'esc' }
+    }
+}
+function Select-Multiple($Items, [string] $Label) {
+    $Items=@($Items)
+    if (-not $Items.Count) { Write-Host 'ℹ️ 没有可选文件。'; return ,@() }
+    $selected=[bool[]]::new($Items.Count); $cursor=0
+    while ($true) {
+        if (-not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected) { Clear-Host }
+        Show-Page $Label '↑ / ↓ 移动 · Space 选择 · A 全选 · N 全不选 · Enter 确认 · Esc 返回'
+        Write-Host "  已选择 $(@($selected | Where-Object { $_ }).Count) / $($Items.Count)"
+        $pageSize=12
+        if (-not [Console]::IsOutputRedirected) { $pageSize=[Math]::Max(1,[Math]::Min(12,[Console]::WindowHeight-16)) }
+        $start=[Math]::Max(0,$cursor-[int][Math]::Floor($pageSize/2)); $end=[Math]::Min($Items.Count,$start+$pageSize)
+        for ($i=$start; $i -lt $end; $i++) {
+            $mark=if ($selected[$i]) { 'x' } else { ' ' }
+            $arrow=if ($cursor -eq $i) { '›' } else { ' ' }
+            Write-Host "  $arrow [$mark] $(Format-DisplayPath $Items[$i].path)"
+        }
+        Write-Host "  第 $($cursor+1) / $($Items.Count) 项" -ForegroundColor DarkGray
+        switch (Read-SelectionKey) {
+            'up' { $cursor=[Math]::Max(0,$cursor-1) }
+            'down' { $cursor=[Math]::Min($Items.Count-1,$cursor+1) }
+            'space' { $selected[$cursor]=-not $selected[$cursor] }
+            'a' { for ($i=0; $i -lt $selected.Length; $i++) { $selected[$i]=$true } }
+            'n' { [Array]::Clear($selected,0,$selected.Length) }
+            'esc' { throw '已取消。' }
+            'enter' { return ,@((0..($Items.Count-1)) | Where-Object { $selected[$_] } | ForEach-Object { $Items[$_] }) }
+        }
+    }
+}
 function Pause-ForContinue {
     while ((Read-Choice '按 Enter 继续') -ne '') { Write-Host '请直接按 Enter 返回菜单。' -ForegroundColor DarkGray }
 }
-function Invoke-MenuOperation([scriptblock] $Action) {
+function Invoke-MenuOperation([scriptblock] $Action, [switch] $KeepDetails) {
+    if (-not $KeepDetails) { $script:LastResult=$null }
     $script:OperationWarning=$false
     try {
         & $Action
@@ -135,19 +181,21 @@ function Invoke-MenuOperation([scriptblock] $Action) {
     }
     catch {
         if ($_.Exception.Message -eq '已取消。') { Write-Host "`nℹ️ 已取消操作。" -ForegroundColor Yellow }
-        else { Write-Host "`n❌ $($_.Exception.Message)" -ForegroundColor Red }
+        else { Save-Details $_.Exception.Message; Write-Host "`n❌ $($_.Exception.Message)" -ForegroundColor Red }
     }
     finally { Pause-ForContinue }
 }
 function Format-DisplayPath([string] $Value) {
-    if ($Value.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar)) { return '.' + $Value.Substring($PSScriptRoot.Length) }
+    if ($Value.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar)) { $Value='.' + $Value.Substring($PSScriptRoot.Length) }
+    $Value=$Value.Replace("`r",'␍').Replace("`n",'␊').Replace("`t",'⇥')
+    if ($Value.Length -gt 100) { return $Value.Substring(0,35)+'…'+$Value.Substring($Value.Length-60) }
     return $Value
 }
 function Read-RuntimeId {
     while ($true) {
-        $value=Read-Required '实例名称，例如 pcl2-debug / hmcl-dev'
+        $value=Read-Required '实例名称，例如 pcl2-debug / hmcl-dev / pcl2-fabric-1211'
         if ($value -cmatch '^[a-z0-9][a-z0-9_-]*$') { return $value }
-        Write-Host '⚠️ 实例名称须以小写字母或数字开头，仅允许小写字母、数字、-、_；不能含句点。示例：pcl2-debug、hmcl-dev。' -ForegroundColor Yellow
+        Write-Host '⚠️ 实例名称须以小写字母或数字开头，仅允许小写字母、数字、-、_；不能含句点。示例：pcl2-debug、hmcl-dev、pcl2-fabric-1211。' -ForegroundColor Yellow
     }
 }
 function Read-Required([string] $Prompt) {
@@ -162,7 +210,10 @@ function Show-Rows($Rows) {
     }
 }
 function Show-Summary($Result) {
-    foreach ($message in $Result.Messages) { if ($message) { Write-Host $message } }
+    if ($Result.Code -ne 0) {
+        $message=@($Result.Messages | Where-Object { $_ }) | Select-Object -Last 1
+        if ($message) { Write-Host (Format-DisplayPath $message) -ForegroundColor Red }
+    }
     foreach ($record in $Result.Records) {
         if ($record -isnot [System.Collections.IDictionary]) { continue }
         if ($record.output) {
@@ -172,45 +223,39 @@ function Show-Summary($Result) {
         } elseif ($record.action -eq 'bind') {
             $r = $record.runtime
             Write-Host "实例: $($r.id) / $($r.targetId) / $($r.launcher)"
-            Write-Host "游戏目录: $($r.gameDir)`n版本目录: $($r.versionDir)`nMinecraft: $($r.mc)"
+            Write-Host "游戏目录: $(Format-DisplayPath $r.gameDir)`n版本目录: $(Format-DisplayPath $r.versionDir)`nMinecraft: $($r.mc)"
             Write-Host "加载器: $(ConvertTo-Json $r.loaders -Compress) | 隔离: $($r.layout)"
             Write-Host $r.evidence
             Write-Host "现有 Mod/配置: $(@($record.existing).Count) 个（不自动接管）"
         } elseif ($record.action -eq 'apply') {
-            Write-Host "目标: $($record.target) | 包版本: $($record.version) | Git: $($record.git) | dirty: $($record.dirty)"
-            Write-Host "来源: $(ConvertTo-Json $record.provenance -Compress)"
+            Write-Host "目标: $($record.target) | 包版本: $($record.version) | 来源: $($record.provenance.kind)"
         } elseif ($record.action -eq 'import-deps') {
             Write-Host "待识别 JAR: $(@($record.candidates).Count) | 已跳过: $(@($record.skipped).Count)"
-            foreach ($item in $record.candidates) { Write-Host "  📦 $($item.path)`n     SHA256: $($item.hash)" }
-            foreach ($item in $record.skipped) { Write-Host "  ─ $($item.path)：$($item.reason)" -ForegroundColor DarkGray }
-            Write-Host $record.notice
         } elseif ($record.Contains('managed')) {
             $labels=@{managed='受管文件';conflicts='冲突';candidates='新增配置';dependencies='Mod 变化'}
             foreach ($key in @('managed','conflicts','candidates','dependencies')) {
-                Write-Host "$($labels[$key]) : $(@($record[$key]).Count)"; Show-Rows $record[$key]
+                Write-Host "$($labels[$key]) : $(@($record[$key]).Count)"
             }
+            if (@($record.conflicts).Count) { $script:OperationWarning=$true }
         } elseif ($record.Contains('actions')) {
             Write-Host "文件变更: $(@($record.actions).Count) | 冲突: $(@($record.conflicts).Count)"
-            Show-Rows $record.actions; Show-Rows $record.conflicts
+            if (@($record.conflicts).Count) { $script:OperationWarning=$true }
             Write-Host "保留未知文件: $(@($record.preserved).Count) | 待下载: $(@($record.downloads).Count)"
         } elseif ($record.projectPath) {
-            Write-Host "候选: $($record.id) | $($record.operation) $($record.project)"
-            Write-Host "SHA256: $($record.hash)`n副本: $($record.projectPath)"
+            Write-Host "待接受依赖: $($record.operation) $($record.project) | 新增项目: $(@($record.added).Count)"
             foreach ($item in $record.added) {
                 Write-Host "  ➕ $($item.name.Values -join ' / ')（$($item.slug.Values -join ' / ')）"
                 foreach ($file in $item.files) { Write-Host "     文件: $($file.name) | 平台版本 ID: $($file.id)" }
             }
-            Write-Host $record.diff.text
-            if ($record.diff.description) { Write-Host $record.diff.description }
-            if ($record.notice) { Write-Host $record.notice }
+            Write-Host '输入 d 可查看完整候选与锁文件差异。' -ForegroundColor DarkGray
         } elseif ($record.Contains('gitDirty')) {
             Write-Host "Target: $($record.selected) | Git dirty: $($record.gitDirty)"
             foreach ($r in $record.runtimes) { Write-Host "  $($r.runtime) / $($r.targetId) 待回收: $(@($r.pendingCollect).Count) 冲突: $($r.conflicts) $($r.error)" }
         } elseif ($record.Contains('bindings')) {
-            foreach ($r in $record.bindings) { Write-Host "  $($r.id) / $($r.targetId) / $($r.launcher) / $($r.gameDir)" }
+            foreach ($r in $record.bindings) { Write-Host "  $($r.id) / $($r.targetId) / $($r.launcher) / $(Format-DisplayPath $r.gameDir)" }
             if (-not $record.bindings.Count) { Write-Host '未绑定' }
         } elseif ($record.directory) {
-            Write-Host "目标: $($record.target) | 准备文件: $(@($record.files).Count) | 临时目录: $($record.directory)"
+            Write-Host "目标: $($record.target) | 准备文件: $(@($record.files).Count)"
         } else {
             foreach ($key in @('check','target','applied','adopted','unchanged','recovery','restored','collected','backup','notice','retained','node','pnpm','java','git','pakku')) {
                 if ($record.Contains($key)) { Write-Host "$key : $($record[$key])" }
@@ -219,11 +264,15 @@ function Show-Summary($Result) {
     }
 }
 function Run-Mp([string[]] $Arguments) {
-    Write-Host "⏳ 执行: mp $($Arguments -join ' ')" -ForegroundColor Cyan
-    $script:LastResult = Invoke-Mp $Arguments -Capture
-    Show-Summary $script:LastResult
-    if ($script:LastResult.Code -ne 0) { throw "命令失败（退出码 $($script:LastResult.Code)）。请查看上方输出；返回后按 d 可查看完整日志。" }
-    return $script:LastResult
+    Write-Host "⏳ 执行: $($Arguments[0])" -ForegroundColor Cyan
+    $result = Invoke-Mp $Arguments -Capture
+    Save-Details $result.Raw
+    Show-Summary $result
+    if ($result.Code -ne 0) { throw "命令失败（退出码 $($result.Code)）。按 d 可查看完整日志。" }
+    return $result
+}
+function Save-Details([string] $Text) {
+    $script:LastResult=@{Raw=(@($script:LastResult.Raw,$Text) | Where-Object { $_ }) -join "`n"}
 }
 function Query-Mp([string[]] $Arguments) {
     $result = Invoke-Mp $Arguments -Capture
@@ -305,7 +354,7 @@ function Invoke-Mods([string] $Choice) {
         $result=Run-Mp ($forward+@('--operation',$operation,'--project',$project))
         $candidate=$result.Records | Where-Object { $_.projectPath } | Select-Object -Last 1
         if (-not $candidate) { throw '没有可接受的候选。' }
-        if (Confirm-Action '已审查上方锁文件差异，接受此候选写入正式源？') {
+        if (Confirm-Action '接受此候选写入正式源？输入 d 可审查锁文件差异') {
             $null=Run-Mp ((Runtime-Arguments 'deps-accept')+@('--candidate',$candidate.id,'--accept-hash',$candidate.hash,'--confirm'))
         }
     } elseif ($Choice -eq '7') {
@@ -319,17 +368,24 @@ function Invoke-Mods([string] $Choice) {
         $result=Run-Mp ($forward+@('--json'))
         $report=$result.Records[-1]
         if (-not $report.candidates.Count) { Write-Host 'ℹ️ 没有需要识别的新增 JAR。'; return }
-        $file=Read-Required '选择一个待识别 JAR 的相对路径，例如 mods/example.jar'
-        $item=$report.candidates | Where-Object path -CEQ $file | Select-Object -First 1
-        if (-not $item) { throw '该路径不在待识别列表中。' }
-        if (-not (Confirm-Action '使用 Pakku 联网识别所选文件并生成临时候选？正式源暂不修改')) { Write-Host 'ℹ️ 已取消识别。'; return }
-        $result=Run-Mp ($forward+@('--file',$file,'--sha256',$item.hash,'--json'))
-        $candidate=$result.Records[-1]
-        if (-not $candidate.projectPath -or -not $candidate.hash) { throw '未生成有效导入候选。' }
-        if (Confirm-Action '已审查新增依赖、许可及锁文件差异，将此候选导入项目？') {
-            $null=Run-Mp ($forward+@('--candidate',$candidate.id,'--accept-hash',$candidate.hash,'--confirm','--json'))
-            Write-Host '📋 可使用 git diff 检查正式 pakku-lock.json 的变化。'
-        } else { Write-Host 'ℹ️ 未导入，正式源保持原样。' }
+        $items=Select-Multiple $report.candidates '📥 选择要导入的依赖'
+        $completed=0; $skipped=0
+        try {
+            foreach ($item in $items) {
+                Write-Host "📦 识别: $(Format-DisplayPath $item.path)"
+                if (-not (Confirm-Action '使用 Pakku 联网识别此文件并生成临时候选？正式源暂不修改')) { $skipped++; continue }
+                # Generate against the latest source after each acceptance; never reuse stale candidates.
+                $result=Run-Mp ($forward+@('--file',$item.path,'--sha256',$item.hash,'--json'))
+                $candidate=$result.Records[-1]
+                if (-not $candidate.projectPath -or -not $candidate.hash) { throw '未生成有效导入候选。' }
+                if (Confirm-Action '确认新增依赖及许可，将此候选导入项目？可输入 d 审查差异') {
+                    $null=Run-Mp ($forward+@('--candidate',$candidate.id,'--accept-hash',$candidate.hash,'--confirm','--json'))
+                    $completed++
+                } else { $skipped++ }
+            }
+        } finally {
+            Write-Host "📥 导入完成 $completed / $($items.Count) 项，跳过 $skipped 项。已完成项保留，可用 git diff 检查。"
+        }
     }
 }
 function Invoke-Runtimes([string] $Choice) {
@@ -355,32 +411,39 @@ function Invoke-Runtimes([string] $Choice) {
 }
 function Invoke-Collect([string] $Choice) {
     $forward=Runtime-Arguments 'collect'
-    if ($Choice -eq '1') { $null=Run-Mp (Runtime-Arguments 'changes'); return }
+    if ($Choice -eq '1') { $null=Run-Mp ((Runtime-Arguments 'changes')+@('--json')); return }
     $result=Run-Mp ($forward+@('--json'))
     $report=$result.Records[-1]
     if ($Choice -eq '5') { Show-Rows $report.dependencies; return }
-    if ($Choice -eq '4') { foreach ($item in $report.candidates) { Write-Host $item.path; Write-Host $item.diff.text }; return }
-    $file=Read-Required '要查看/回收的相对路径，例如 config/example.json'
+    if ($Choice -eq '4') { foreach ($item in $report.candidates) { Write-Host (Format-DisplayPath $item.path) }; return }
     $items=@($report.managed)+@($report.candidates)
-    $item=$items | Where-Object path -CEQ $file | Select-Object -First 1
-    if (-not $item) { throw '该路径不在配置变更或新增候选中。' }
-    Write-Host "$file → $($item.source) | $($item.state)"
-    Write-Host ($item.diff.text ?? $item.diff.description ?? '文件无文本差异。')
-    if ($Choice -eq '2') { return }
-    $forward+=@('--file',$file)
-    if ($item.state -eq 'candidate') {
-        Write-Host "`n  [1] 🖥️ 客户端覆盖`n  [2] 📦 公共覆盖`n  [0] ↩️ 取消"
-        $location=Read-Choice '选择新增配置来源'
-        if ($location -eq '0') { return }
-        $prefix=@{'1'='.pakku/client-overrides/';'2'='.pakku/overrides/'}[$location]
-        if (-not $prefix) { throw '来源选择无效。' }
-        $forward+=@('--source',($prefix+$file)); Write-Host "写入源位置: $prefix$file"
-    } elseif ($item.state -ne 'runtime-only') { throw '只能回收仅实例变化的文件；冲突需要先人工合并。' }
-    elseif ($null -eq $item.runtime) {
-        if (-not (Confirm-Action "单独确认删除正式源文件 $($item.source)？")) { return }
-        $forward+='--delete'
+    if ($Choice -eq '2') {
+        $file=Read-Required '要查看的相对路径，例如 config/example.json'
+        $item=$items | Where-Object path -CEQ $file | Select-Object -First 1
+        if (-not $item) { throw '该路径不在配置变更或新增候选中。' }
+        Write-Host ($item.diff.text ?? $item.diff.description ?? '文件无文本差异。'); return
     }
-    if (Confirm-Stopped) { $null=Run-Mp ($forward+@('--confirm','--stopped')) }
+    Write-Host '仅列出可回收文件；冲突需要先人工合并，二进制文件不自动回收。'
+    $selected=Select-Multiple @($items | Where-Object { $_.state -in @('runtime-only','candidate') -and -not $_.binary -and -not $_.diff.binary }) '📥 选择要回收的配置'
+    $completed=0
+    try {
+        foreach ($item in $selected) {
+            $file=$item.path; $writeArgs=$forward+@('--file',$file)
+            Write-Host "📄 $(Format-DisplayPath $file) → $(Format-DisplayPath $item.source) | $($item.state)"
+            if ($item.state -eq 'candidate') {
+                Write-Host "  [1] 🖥️ 客户端覆盖`n  [2] 📦 公共覆盖`n  [0] ↩️ 跳过此文件"
+                $location=Read-Choice '选择新增配置来源'
+                if ($location -eq '0') { continue }
+                $prefix=@{'1'='.pakku/client-overrides/';'2'='.pakku/overrides/'}[$location]
+                if (-not $prefix) { throw '来源选择无效。' }
+                $writeArgs+=@('--source',($prefix+$file)); Write-Host "写入源位置: $(Format-DisplayPath ($prefix+$file))"
+            } elseif ($null -eq $item.runtime) {
+                if (-not (Confirm-Action "单独确认删除正式源文件 $($item.source)？")) { continue }
+                $writeArgs+='--delete'
+            }
+            if (Confirm-Stopped) { $null=Run-Mp ($writeArgs+@('--confirm','--stopped')); $completed++ }
+        }
+    } finally { Write-Host "📥 回收完成 $completed / $($selected.Count) 项。已完成项保留，可用 git diff 检查。" }
 }
 function Invoke-Builds([string] $Choice) {
     if ($Choice -eq '2') { Refresh-Selection } else { Require-Target }
@@ -390,6 +453,7 @@ function Invoke-Builds([string] $Choice) {
         if (-not $latest) { $script:OperationWarning=$true; Write-Host '⚠️ 当前目标还没有本地构建结果。' -ForegroundColor Yellow; return }
         $report=Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json -AsHashtable
         $report.output=$latest.DirectoryName; $report.target=$report.targetId
+        Save-Details ($report | ConvertTo-Json -Depth 20)
         Show-Summary @{Code=0;Records=@($report);Messages=@()}; return
     }
     $ids=if ($Choice -eq '2') { @($script:Targets.id) } else { @($script:TargetChoice) }
@@ -424,19 +488,78 @@ function Invoke-Checks([string] $Choice) {
     }
     if ($forward) { $null=Run-Mp $forward }
 }
-function Invoke-Git([string] $Choice) {
-    $global:LASTEXITCODE=0
-    switch ($Choice) {
-        '1' { & git status --short }
-        '2' { & git --no-pager diff; & git --no-pager diff --cached }
-        '3' {
-            Write-Host '只提交已暂存文件；请在终端用 git add <文件> 明确暂存。'
-            & git --no-pager diff --cached --stat
-            & $script:Pnpm.Source run commit
-        }
-        '4' { & $script:Pnpm.Source run lint:commits }
+# Capture NUL-delimited Git output without PowerShell's line conversion.
+function Read-Git([string[]] $Arguments) {
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName=(Get-Command git -CommandType Application -ErrorAction Stop).Source
+    $start.WorkingDirectory=$PSScriptRoot; $start.UseShellExecute=$false
+    $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+    $start.StandardOutputEncoding=[Text.Encoding]::UTF8
+    foreach ($arg in $Arguments) { $start.ArgumentList.Add($arg) }
+    $process=[Diagnostics.Process]::Start($start)
+    try {
+        $outTask=$process.StandardOutput.ReadToEndAsync(); $errTask=$process.StandardError.ReadToEndAsync()
+        $process.WaitForExit(); $output=$outTask.GetAwaiter().GetResult(); $errorText=$errTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { Save-Details $errorText; throw "Git 失败：$(Format-DisplayPath $errorText)" }
+        return $output
+    } finally { $process.Dispose() }
+}
+function Read-GitFiles {
+    $raw=Read-Git @('status','--porcelain=v1','-z','--untracked-files=all')
+    $parts=$raw.Split([char]0); $items=@()
+    for ($i=0; $i -lt $parts.Length; $i++) {
+        if (-not $parts[$i]) { continue }
+        $state=$parts[$i].Substring(0,2); $name=$parts[$i].Substring(3); $paths=@($name)
+        if ($state -match '[RC]') { $paths+= $parts[++$i] }
+        if ($state -match 'U' -or $state -in @('AA','DD')) { throw '存在未解决的 Git 合并冲突，请先在编辑器中处理。' }
+        $items+=@{path=$name;paths=$paths;state=$state;staged=($state[0] -notin @(' ','?'))}
     }
-    if ($LASTEXITCODE -ne 0) { throw "Git/提交工具失败（退出码 $LASTEXITCODE）。" }
+    return ,$items
+}
+function Invoke-Git([string] $Choice) {
+    if ($Choice -eq '4') {
+        $output=@(& $script:Pnpm.Source run lint:commits 2>&1); Save-Details ($output -join "`n")
+        if ($LASTEXITCODE -ne 0) { throw '提交信息校验失败，按 d 查看详情。' }
+        Write-Host '✅ 提交信息校验通过。'; return
+    }
+    if ($Choice -eq '2') {
+        Save-Details (Read-Git @('--no-pager','diff','--no-ext-diff'))
+        Save-Details (Read-Git @('--no-pager','diff','--cached','--no-ext-diff'))
+        Write-Host (Read-Git @('diff','--stat')); Write-Host (Read-Git @('diff','--cached','--stat'))
+        Write-Host '📄 完整差异已保留，返回后按 d 查看。'; return
+    }
+    $items=Read-GitFiles
+    Save-Details ($items | ConvertTo-Json -Depth 5)
+    if ($Choice -eq '1') {
+        Write-Host "🌿 变化文件: $($items.Count) | 已暂存: $(@($items | Where-Object staged).Count)"
+        foreach ($item in $items) { Write-Host "  $($item.state) $(Format-DisplayPath $item.path)" }; return
+    }
+    $selected=Select-Multiple $items '🌿 选择需要暂存的文件（包含该文件全部修改）'
+    if (-not $selected.Count) { Write-Host 'ℹ️ 未选择文件，暂存区保持原样。'; return }
+    $paths=@($selected | ForEach-Object { $_.paths })
+    if ($Choice -eq '3' -and @($items | Where-Object { $_.staged -and $_.path -cnotin $selected.path }).Count) {
+        throw '暂存区包含未选中的文件。请一并选择，或先在编辑器中调整暂存区；本次未暂存或提交。'
+    }
+    # Already-staged deletions/renames have no old index path left for git add.
+    $stagePaths=@($selected | Where-Object { $_.state[1] -ne ' ' } | ForEach-Object { $_.path })
+    # Literal pathspecs and NUL records preserve spaces, Unicode and special filenames.
+    $pathFile=Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+    try {
+        if ($stagePaths.Count) {
+            [IO.File]::WriteAllText($pathFile,($stagePaths -join [char]0)+[char]0,[Text.UTF8Encoding]::new($false))
+            $null=Read-Git @('--literal-pathspecs','add',"--pathspec-from-file=$pathFile",'--pathspec-file-nul')
+        }
+    } finally { Remove-Item -LiteralPath $pathFile -Force -ErrorAction SilentlyContinue }
+    Write-Host "✅ 已暂存 $($selected.Count) 个文件。"
+    Save-Details (Read-Git @('--no-pager','diff','--cached','--no-ext-diff'))
+    if ($Choice -eq '3') {
+        # Recheck the index before opening cz-git; preserve any unrelated staged work.
+        $staged=@((Read-Git @('diff','--cached','--name-only','--no-renames','-z')).Split([char]0) | Where-Object { $_ })
+        if (@($staged | Where-Object { $_ -cnotin $paths }).Count) { throw '暂存区出现未选择的文件，已停止提交。请检查 Git 状态。' }
+        if (-not $staged.Count) { Write-Host 'ℹ️ 没有需要提交的变化。'; return }
+        & $script:Pnpm.Source run commit
+        if ($LASTEXITCODE -ne 0) { throw '提交未完成，已暂存文件保留。' }
+    }
 }
 function Invoke-Advanced {
     Show-Page '🛠️ Pakku 高级操作' '逐个输入原生参数，空行结束；输入 0 取消。'
@@ -477,11 +600,11 @@ function Show-Menu {
         '1'=@('🚀 部署到当前实例','👀 准备并预览部署变化','🎮 切换测试实例','🎯 切换目标','🛟 恢复失败部署（Recover）')
         '2'=@('➕ 添加 Mod','➖ 删除 Mod','🔄 更新指定 Mod','🔄 更新全部 Mod','📋 查看 Mod 列表','🔎 按项目 ID 审查依赖增删','↩️ 恢复实例中的正式依赖','📥 从实例导入新增依赖')
         '3'=@('📋 查看已绑定实例','🔗 绑定 PCL2 实例','🔗 绑定 HMCL 实例','🎮 切换当前实例','🔓 解除绑定')
-        '4'=@('📋 查看全部变化','🔎 查看指定配置差异','📥 回收指定配置','🆕 审查新增配置候选','🧩 查看依赖偏离')
+        '4'=@('📋 查看全部变化','🔎 查看指定配置差异','📥 选择配置并回收','🆕 审查新增配置候选','🧩 查看依赖偏离')
         '5'=@('📦 构建当前目标','📦 构建所有目标','📂 查看最近构建结果')
         '6'=@('📂 应用本地 MRPACK','⚙️ 应用 GitHub Actions Run','🏷️ 应用 GitHub Release')
         '7'=@('🔍 检查当前目标','🔍 检查全部目标','🩺 环境诊断','📥 安装 / 校验 Pakku','📋 查看工作区状态')
-        '8'=@('🌿 查看 Git 状态','🔎 查看 Git Diff','📝 交互式提交','✅ 校验提交信息')
+        '8'=@('🌿 查看 Git 状态','🔎 查看 Git Diff','📝 选择文件并提交','✅ 校验提交信息','📥 选择文件并暂存')
     }
     $section=''
     $refresh=$true
@@ -511,7 +634,7 @@ function Show-Menu {
         $choice=Read-Choice '请选择'
         if ($choice -eq '0') { if (-not $section) { return }; $section=''; continue }
         if ($choice -eq 'r') { $refresh=$true; continue }
-        if ($choice -eq 'd') { Invoke-MenuOperation { Write-Host ($script:LastResult.Raw ?? '暂无操作输出。') }; continue }
+        if ($choice -eq 'd') { Invoke-MenuOperation -KeepDetails { Write-Host ($script:LastResult.Raw ?? '暂无操作输出。') }; continue }
         try {
             if (-not $section) {
                 if ($choice -eq '9') { $refresh=$true; Invoke-MenuOperation { Invoke-Advanced } }
