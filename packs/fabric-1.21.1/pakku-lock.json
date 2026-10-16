@@ -1,0 +1,10 @@
+{
+    "target": "modrinth",
+    "mc_versions": [
+        "1.21.1"
+    ],
+    "loaders": {
+        "fabric": "0.16.14"
+    },
+    "lockfile_version": 2
+}

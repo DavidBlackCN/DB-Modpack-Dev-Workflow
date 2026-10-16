@@ -1,0 +1,13 @@
+{
+    "name": "DB-Example-Fabric",
+    "version": "0.1.0",
+    "overrides": [
+        "config"
+    ],
+    "client_overrides": [
+        "client-note.txt"
+    ],
+    "server_overrides": [
+        "server-note.txt"
+    ]
+}
