@@ -278,10 +278,20 @@ async function gitFixture(t) {
   const f=await fixture(t);
   const git=(...args)=>{const r=spawnSync('git',args,{cwd:f.root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout;};
   git('init','-q');git('config','user.name','Menu Test');git('config','user.email','menu@example.invalid');
-  await fs.writeFile(path.join(f.root,'.gitignore'),'ci.ps1\nbin/\nmock.mjs\nspec.json\ncalls.jsonl\n');
+  await fs.writeFile(path.join(f.root,'.gitignore'),'ci.ps1\nbin/\nmock.mjs\nspec.json\ncalls.jsonl\ngit-alias/\n');
   for(const name of ['a.txt','b.txt','delete.txt','old.txt'])await fs.writeFile(path.join(f.root,name),name+'\n');
   git('add','--','.gitignore','a.txt','b.txt','delete.txt','old.txt');git('commit','-qm','fixture');
-  const execute=input=>f.execute([],input,{PATH:f.bin+path.delimiter+process.env.PATH});
+  // Actions runners expose multiple Git applications (Windows bin/cmd, Linux /usr/bin and /bin).
+  // Add a distinct directory alias so this case is also exercised on single-Git developer machines.
+  const resolved=spawnSync(pwsh,['-NoProfile','-Command','(Get-Command git -CommandType Application | Select-Object -First 1).Source'],{encoding:'utf8'});
+  assert.equal(resolved.status,0,resolved.stderr);
+  const alias=path.join(f.root,'git-alias');
+  await fs.symlink(path.dirname(resolved.stdout.trim()),alias,process.platform==='win32'?'junction':'dir');
+  const menuPath=f.bin+path.delimiter+process.env.PATH+path.delimiter+alias;
+  const discovery=spawnSync(pwsh,['-NoProfile','-Command','@(Get-Command git -CommandType Application).Count'],{encoding:'utf8',env:{...process.env,PATH:menuPath}});
+  assert.equal(discovery.status,0,discovery.stderr);
+  assert.ok(Number(discovery.stdout.trim())>=2,'fixture must expose multiple Git applications');
+  const execute=input=>f.execute([],input,{PATH:menuPath});
   return {...f,git,execute};
 }
 

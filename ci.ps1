@@ -491,7 +491,8 @@ function Invoke-Checks([string] $Choice) {
 # Capture NUL-delimited Git output without PowerShell's line conversion.
 function Read-Git([string[]] $Arguments) {
     $start=[Diagnostics.ProcessStartInfo]::new()
-    $start.FileName=(Get-Command git -CommandType Application -ErrorAction Stop).Source
+    # -CommandType may return several PATH matches; ProcessStartInfo needs one executable.
+    $start.FileName=(Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $start.WorkingDirectory=$PSScriptRoot; $start.UseShellExecute=$false
     $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
     $start.StandardOutputEncoding=[Text.Encoding]::UTF8
