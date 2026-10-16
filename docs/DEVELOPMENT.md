@@ -1,5 +1,29 @@
 # 开发指南
 
+## Windows 统一入口
+
+安装 README 中的环境和依赖后，在 PowerShell 7.3 或更新版本执行 `.\ci.ps1`。入口使用新版原生参数传递方式，以保留参数中的引号和空格。输入编号操作，`0` 返回上一级，`d` 查看上次操作的完整输出。菜单显示当前目标、实例和 Git 状态；没有绑定实例时仍可管理依赖、检查或构建。
+
+在“开发测试”中切换 Target 或 Runtime。目标沿用 `mp use` 的本机设置；一个目标只有一个绑定时自动选用，多个绑定时手动选择，并在当前菜单会话中保留。切换目标不会继续使用另一个目标的实例。
+
+部署前先准备清单并预览；准备会写入本地临时目录。确认游戏已关闭后才写入实例。配置回收逐个选择文件，先显示差异；删除和新配置来源单独确认。Apply 先显示来源、提交、包哈希与文件变化，再将确认过的哈希交给 CLI 校验。
+
+直接模式适合重复操作或脚本调用：
+
+```powershell
+.\ci.ps1 help
+.\ci.ps1 status
+.\ci.ps1 check -All
+.\ci.ps1 build -Target fabric-1.21.1
+.\ci.ps1 changes -Runtime hmcl-dev
+.\ci.ps1 deploy -Runtime hmcl-dev -Target fabric-1.21.1 -Stopped
+.\ci.ps1 mp -- collect hmcl-dev --file config/db-client.json --confirm --stopped
+```
+
+直接模式不询问确认，缺少底层必需参数时会报错或仅预览，失败退出码保持不变。`mp --` 后按标准 CLI 参数原样转发；含空格路径用引号包围。菜单的 Pakku 高级操作逐个收集参数，不解析 shell 命令。
+
+“Git 提交”调用现有 cz-git / commitlint，不自动暂存或推送；先在终端用 `git add <文件>` 选择提交内容。缺少工具时菜单给出安装提示，不自动安装环境。
+
 ## 管理目标
 
 `workspace.json` 中每个条目对应一个独立 Pakku 工程：

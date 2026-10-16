@@ -4,6 +4,14 @@
 
 模板包含 Fabric 和 NeoForge 两个 Minecraft 1.21.1 示例，均无 Mod 依赖，仅用少量配置和文本演示公共、客户端、服务端文件的打包方式。
 
+Windows 日常开发推荐在 PowerShell 7.3 或更新版本中打开统一菜单：
+
+```powershell
+.\ci.ps1
+```
+
+菜单提供开发部署、Mod 管理、实例绑定、配置回收、构建、预览包应用和 Git 提交。首次使用先按下节准备环境和安装依赖。`ci.ps1` 是本地开发入口，不是 GitHub Actions 运行器；熟练用户可直接使用 pnpm / mp，Codex、AI 和自动化工具继续使用标准 CLI。
+
 ## 快速开始
 
 准备 Node.js 24、pnpm 10.28.2、Java 21 和 Git。固定工具版本及 Pakku 校验值见 [toolchain.json](toolchain.json)。
@@ -45,6 +53,8 @@ pnpm run mp -- remove sodium --target fabric-1.21.1
 - [架构说明](docs/WORKFLOW_ARCHITECTURE.md)：各工具职责与目录组织。
 
 完整命令见 `pnpm run mp -- help`。`.local/` 保存本机绑定与备份，`.cache/` 保存工具和下载缓存，`.work/` 保存临时构建副本，`dist/` 保存构建结果；这些目录不提交，也不随模板复制。
+
+快捷模式例如 `.\ci.ps1 check -All`、`.\ci.ps1 build -Target fabric-1.21.1`、`.\ci.ps1 status`；更多参数见 `.\ci.ps1 help`。直接模式不询问确认，也不自动添加写入确认参数。
 
 ## 提交规范
 

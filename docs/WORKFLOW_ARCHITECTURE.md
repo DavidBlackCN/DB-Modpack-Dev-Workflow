@@ -4,6 +4,7 @@
 
 | 工具 | 职责 |
 | --- | --- |
+| `ci.ps1` | Windows 中文菜单、快捷命令、用户确认，调用标准 CLI |
 | Pakku | 管理 Mod 依赖和锁文件，导出整合包 |
 | Workspace CLI（`mp`） | 选择目标、检查源文件、组织构建、同步测试实例 |
 | PCL2 / HMCL | 安装和启动 Minecraft、加载器，管理账户与游戏环境 |
@@ -12,9 +13,12 @@
 
 每个目标都是标准 Pakku 工程。CLI 调用 Pakku，不重复实现依赖解析，也不保存第二份 Mod 清单。
 
+入口关系为 `ci.ps1 → pnpm run mp -- … → tools/mp.mjs`。菜单读取现有目标、绑定和状态；Target 选择通过 `mp use` 保存，Runtime 选择保留在菜单会话中。部署、回收、备份和构建仍由 Node 核心模块执行。
+
 ## 目录组织
 
 ```text
+├── ci.ps1               # 本地交互菜单与快捷命令
 ├── workspace.json       # 目标名称、路径、需要收集的包类型
 ├── toolchain.json       # 工具版本、下载地址和校验值
 ├── packs/
