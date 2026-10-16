@@ -14,6 +14,39 @@ import {acceptDependencies} from './dependencies.mjs';
 
 const matches=(file,hashes)=>['sha512','sha256','sha1'].some(algorithm=>file.hashes?.[algorithm]===hashes[algorithm]);
 
+// Pakku 1.5.0 Project.pakkuLinks is a set of Pakku IDs, not part of file identity.
+// Keep every other field (including future fields) exact; only additive links to new projects are allowed.
+function checkImportIntegrity(before,after) {
+  const omit=(value,key)=>Object.fromEntries(Object.entries(value).filter(([k])=>k!==key));
+  if(!isDeepStrictEqual(omit(before,'projects'),omit(after,'projects')))throw new Error('导入候选修改了目标版本或顶层上下文，拒绝接受');
+  const index=lock=>{
+    const projects=lock.projects??[];
+    if(!Array.isArray(projects))throw new Error('导入候选 Project 列表无效');
+    const result=new Map();
+    for(const project of projects) {
+      if(!project||typeof project.pakku_id!=='string'||!project.pakku_id.trim()||result.has(project.pakku_id))throw new Error('导入候选存在缺失或重复的 pakku_id');
+      result.set(project.pakku_id,project);
+    }
+    return result;
+  };
+  const old=index(before),next=index(after),added=[...next.values()].filter(p=>!old.has(p.pakku_id));
+  const addedIds=new Set(added.map(p=>p.pakku_id));
+  const links=project=>{
+    const values=Object.hasOwn(project,'pakku_links')?project.pakku_links:[];
+    if(!Array.isArray(values)||values.some(v=>typeof v!=='string'||!v.trim())||new Set(values).size!==values.length)throw new Error('导入候选 pakku_links 必须是无重复的 Project ID 列表');
+    return new Set(values);
+  };
+  for(const [id,project] of old) {
+    const current=next.get(id);
+    if(!current||!isDeepStrictEqual(omit(project,'pakku_links'),omit(current,'pakku_links')))throw new Error('导入候选删除或修改了现有依赖核心内容，拒绝接受');
+    const previousLinks=links(project),currentLinks=links(current);
+    if([...previousLinks].some(link=>!currentLinks.has(link)))throw new Error('导入候选删除了已有 pakku_links，拒绝接受');
+    if([...currentLinks].some(link=>!previousLinks.has(link)&&!addedIds.has(link)))throw new Error('新增 pakku_links 未指向本次新增 Project，拒绝接受');
+  }
+  for(const project of added)if([...links(project)].some(link=>!next.has(link)))throw new Error('新增 Project 的 pakku_links 指向不存在的 Project，拒绝接受');
+  return added;
+}
+
 // Only inventory active top-level mods. Pakku, not filenames or embedded metadata, resolves identity.
 export async function scanImportDependencies(root,runtime,target) {
   await verifyRuntime(root,runtime,target);await checkJournal(root,runtime);
@@ -64,10 +97,7 @@ export async function importDependencies(root,runtime,target,options={}) {
   await checkTarget(root,{...target,path:projectPath},options);
   const candidate=await sourceSnapshot(root,{...target,path:projectPath});
   for(const name of new Set([...info.source,...candidate.source]))if(name!=='pakku-lock.json'&&info.hashes[name]!==candidate.hashes[name])throw new Error('Pakku 修改了锁文件之外的源，拒绝导入');
-  const old=info.lock.projects??[],next=candidate.lock.projects??[];
-  const withoutProjects=lock=>Object.fromEntries(Object.entries(lock).filter(([k])=>k!=='projects'));
-  if(!isDeepStrictEqual(withoutProjects(info.lock),withoutProjects(candidate.lock))||old.some(p=>!next.some(n=>isDeepStrictEqual(p,n))))throw new Error('导入候选修改了现有依赖或目标版本，拒绝接受');
-  const added=next.filter(p=>!old.some(o=>isDeepStrictEqual(o,p)));
+  const added=checkImportIntegrity(info.lock,candidate.lock);
   const identified=added.filter(p=>p.type==='MOD'&&(p.files??[]).some(f=>matches(f,selected.hashes)));
   if(identified.length!==1)throw new Error('Pakku 未唯一识别该新增 Mod；可能来源未知、版本不兼容或项目已被管理。未导入');
   if((await fileInfo(runtime.gameDir,selected.path))?.hash!==selected.hash)throw new Error('识别期间 JAR 已变化');
