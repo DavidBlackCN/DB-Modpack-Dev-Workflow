@@ -54,7 +54,7 @@ export function clientManifest(entries, info) {
 }
 export async function prepare(root,target,options={}) {
   const info = await sourceSnapshot(root,target);
-  if (!['modrinth','multiplatform'].includes(info.lock.target)) throw new Error('Phase 2 需要 Pakku 可导出 MRPACK 的 Target；不猜测 CurseForge 下载');
+  if (!['modrinth','multiplatform'].includes(info.lock.target)) throw new Error('实例同步需要可导出 MRPACK 的 Pakku 目标（modrinth 或 multiplatform）');
   const existing = await readPrepared(root,target,info).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
   if (existing) return existing;
   await checkTarget(root,target,options);

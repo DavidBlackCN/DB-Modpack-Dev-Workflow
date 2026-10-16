@@ -18,7 +18,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 if (args[0] === '--') args.shift();
 const command = args.shift() ?? 'help';
-const help = `DB Modpack Dev Workflow v2 — Phase 4
+const help = `DB Modpack Dev Workflow v2
 pnpm run mp -- <命令>
   help                         中文帮助
   bootstrap                    显式下载并校验固定 Pakku（可重复）
@@ -41,7 +41,7 @@ pnpm run mp -- <命令>
   deploy <name> --stopped      确认游戏已关闭后安全增量部署
        [--adopt-existing]      仅显式接管内容完全相同的现有文件
   recover <name> --stopped     从 journal/备份恢复失败部署
-  changes <name> [--json]      只读 B/S/R 比较与依赖偏离
+  changes <name> [--json]      比较源文件、实例与上次部署，查看 Mod 变化
   collect <name> [--json]      只读文件清单及文本差异预览
        --file <运行相对路径> --confirm --stopped  明确回收一个文件
        [--delete]             明确接受已受管文件的实例删除
@@ -54,7 +54,7 @@ pnpm run mp -- <命令>
        --confirm --stopped [--file mods/<额外或禁用 JAR>]
                                备份后修复受管依赖；仅点选额外 JAR 移入备份
   dev <name> --stopped         Deploy 后显示手动启动提示
-  status                      只读本机选择、部署来源、待回收与 Git dirty
+  status                      查看本机选择、部署来源、待回收及未提交改动
   apply <name> --file <包.mrpack> [--dry-run]
        或 --repo owner/repo --run <Run ID>
        或 --repo owner/repo --release release/<target>/v<version>

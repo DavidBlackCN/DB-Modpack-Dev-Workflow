@@ -1,21 +1,11 @@
-# 工作约定
+# 仓库维护约定
 
-- 本仓库仅为 DB Modpack Dev Workflow v2 示例模板。用户已明确批准 Phase 4；四阶段实现完成后统一验收，停止并等待改进意见。不自行开始正式包迁移。
-- 先阅读 `WORKFLOW_ARCHITECTURE.md`、`CODEX_IMPLEMENTATION_PLAN.md` 和 `docs/PAKKU.md`。
-- 不修改 Preliminary-Art-Form-Modpack、旧模板仓库或其他无关项目；不访问真实游戏实例进行写入。
-- 使用 pnpm、JavaScript ESM、固定 Pakku JAR/SHA-256。不要引入 packwiz PowerShell 工作流、第二份 Mod 列表或自研依赖解析。
-- `packs/<target>` 是可独立调用 Pakku 的源工程。配置由 init/cfg 生成，覆盖规则可按官方文档编辑；锁文件通过 Pakku 维护，不手编。
-- 本机选择放 `.local`，工具放 `.cache`，构建副本放 `.work`，产物放 `dist`；不提交这些目录及凭据、JAR、私人数据、Pakku build/shelf/remote/docs。
-- 保留 `.pakku/overrides`、client-overrides、server-overrides 正式资源。Phase 1 默认拒绝所有源 JAR；自有资源许可需单独审查。
-- 修改前报告计划。check/doctor 只读；build 只在副本 export。注意 v1.5.0 使用 cwd + `--working-path .` 的路径兼容要求。
-- Phase 2 绑定仅在 `.local` 保存路径和证据；别名共享规范化路径键。部署采用 Pakku 导出的客户端清单，不在 Runtime 执行 sync/fetch，不接管私人/启动器文件。dry-run 必须完全只读；缺少当前快照时要求显式 prepare。
-- deploy/recover 必须检查停止状态，遇冲突整批拒绝；保留 journal/备份，删除仅限上次成功部署且未被本地修改的受管文件。未完成操作先 recover，不跳过锁或伪称多文件原子性。
-- 验证 `pnpm test`、`pnpm run mp -- check --all`、双目标 build；集成验证 `node tools/verify-phase1.mjs`（联网 bootstrap，写忽略目录）。记录失败/未执行，不伪报通过。
-- Phase 2 集成验证为 `node tools/verify-phase2.mjs`：临时目录中复制模板与 launcher fixtures，真实 Pakku/Sodium 下载，不运行 Mod JAR。真实启动器游戏启动须用户手测；不得将假实例通过等同于实机通过。
-- Phase 3 的 changes/status/collect 预览完全只读；Collect 必须点选单文件并 confirm/stopped，按 B/S/R 阻断冲突，保留原侧别映射。新候选仅支持明确 manual override 位置的文本 config；不回收私人数据、JAR、二进制/超大候选或凭据。
-- 依赖候选从完整 Target 复制，由 Pakku add/rm --no-deps 生成锁文件；接受需候选 SHA256 和源快照一致。不得对客户端执行全量 sync，不猜测未知 JAR 身份或许可。restore-deps 备份受影响文件并复用 recover，未知文件仅在被点选后移入备份。
-- 运行 `node tools/verify-phase3.mjs` 验证假实例闭环及真实 Pakku ServerCore/Sodium 候选/恢复；不执行 JAR，不修改示例正式锁文件。
-- Phase 4 Apply 复用 Deploy/recover；默认只读预览，真实应用必须提供已审查 SHA256、confirm 和 stopped。文件入口需要同目录 build-report.json/SHA256SUMS；远端读取要求明确 repo 和 Run/Tag，认证不能写进日志或转发到下载存储。
-- CI/Release 只构建确定提交，不更新依赖、不执行游戏/JAR、不提供 Fork 发布凭据。固定 Actions SHA、工具版本；Required checks 永远汇总。发布仅草稿，已存在 Release 一律拒绝覆盖，不自动公开。
-- 新检查：`pnpm exec node tools/verify-phase4.mjs`（真实 pnpm 环境）、Windows/Linux 单测、workflow actionlint。GitHub 实跑与真实启动器未验证时必须如实说明；不能把模拟 API/假实例当成实跑。
-- 中文文档；使用 `pnpm run commit`、`pnpm run lint:commits`；Gitmoji + Conventional Commits，标题不超过 72 字符。原子提交，不自动 Push。
+- 使用 pnpm 和 JavaScript ESM。项目结构见[架构说明](docs/WORKFLOW_ARCHITECTURE.md)，常用操作见[开发指南](docs/DEVELOPMENT.md)。
+- Pakku 负责依赖解析和锁文件维护，不另建 Mod 清单。新增参数或配置字段时核对固定版本的官方文档、源码与命令帮助；锁文件通过 Pakku 修改。
+- 工具版本、下载地址和 SHA-256 统一记录在 `toolchain.json`。Pakku 调用以目标目录为 cwd，并传入 `--working-path .`。
+- `packs/<目标名>` 保持可独立使用 Pakku。保留正式 overrides 资源；不提交 JAR、凭据、游戏数据、缓存或构建产物。
+- `check`、`doctor`、`changes` 和预览操作保持只读。构建在 `.work/` 副本执行；绑定、备份和部署记录放在 `.local/`。
+- 同步只操作明确绑定实例中的受管文件。未知文件保留，冲突先报告；游戏运行时不写入。自动测试使用临时实例，不依赖真实游戏目录。
+- 修改行为时补充对应测试并运行 `pnpm test`。涉及 Pakku 或构建时，另运行 `pnpm run mp -- check --all` 和受影响目标的 build；涉及两个示例的公共逻辑时构建两个目标。文档修改检查命令、链接及格式。
+- 文档使用简洁中文，说明使用方法、实际行为和必要限制。
+- 提交遵循 README 中的 Gitmoji + Conventional Commits 规范，使用 `pnpm run commit` 和 `pnpm run lint:commits`。不提交无关文件；按用户要求决定是否推送。

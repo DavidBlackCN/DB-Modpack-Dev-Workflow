@@ -40,7 +40,7 @@ export async function inspectTarget(root, target) {
     if (!Array.isArray(rules)) throw new Error(`${field} 必须是数组`);
     for (const rule of rules) {
       relativePath(rule);
-      if (/[!*?{}\[\]]/.test(rule)) throw new Error(`Phase 1 检查仅支持显式文件/目录规则，请展开 glob: ${rule}`);
+      if (/[!*?{}\[\]]/.test(rule)) throw new Error(`检查仅支持明确的文件/目录规则，请展开通配符: ${rule}`);
       if (rule.startsWith('.pakku/')) throw new Error('manual overrides 自动纳入，不要重复声明 .pakku');
       const matched = source.filter(f => f === rule || f.startsWith(rule + '/'));
       if (!matched.length) throw new Error(`override 未匹配文件: ${rule}`);
