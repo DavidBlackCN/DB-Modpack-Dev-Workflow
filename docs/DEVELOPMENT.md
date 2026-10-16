@@ -2,7 +2,9 @@
 
 ## Windows 统一入口
 
-安装 README 中的环境和依赖后，在 PowerShell 7.3 或更新版本执行 `.\ci.ps1`。入口使用新版原生参数传递方式，以保留参数中的引号和空格。输入编号操作，`0` 返回上一级，`d` 查看上次操作的完整输出。菜单显示当前目标、实例和 Git 状态；没有绑定实例时仍可管理依赖、检查或构建。
+安装 README 中的环境和依赖后，在 PowerShell 7.3 或更新版本执行 `.\ci.ps1`。入口使用新版原生参数传递方式，以保留参数中的引号和空格。输入编号操作，`0` 返回上一级，`d` 查看上次操作的完整输出。菜单显示当前目标、实例、启动器和 Git 状态；没有绑定实例时仍可管理依赖、检查或构建。
+
+叶子操作结束后会显示结果，按 Enter 才返回菜单；成功、无结果、取消和失败均可先阅读输出。翻页不暂停，直接命令不暂停。
 
 在“开发测试”中切换 Target 或 Runtime。目标沿用 `mp use` 的本机设置；一个目标只有一个绑定时自动选用，多个绑定时手动选择，并在当前菜单会话中保留。切换目标不会继续使用另一个目标的实例。
 
@@ -76,7 +78,7 @@ pnpm run mp -- update sodium --target fabric-1.21.1
 pnpm run mp -- remove sodium --target fabric-1.21.1
 ```
 
-`update` 不带项目名时更新所选目标的全部依赖。修改后检查 `pakku.json` 和 `pakku-lock.json` 的 Git 差异。更多原生操作通过 `mp pakku --target <目标名> -- <参数>` 调用。
+`update` 不带项目名时更新所选目标的全部依赖。修改后检查 `pakku.json` 和 `pakku-lock.json` 的 Git 差异。更多原生操作通过 `mp pakku --target <目标名> -- <参数>` 调用。实例中新增的 Mod 可通过“Mod / 依赖管理 → 从实例导入新增依赖”识别并导入，流程见[启动器同步](LAUNCHER_SYNC.md#导入实例新增依赖)。
 
 Pakku 固定版本与 SHA-256 见 [toolchain.json](../toolchain.json)。独立调用 Pakku 1.5.0 时，先进入目标目录，再传入 `--working-path .`；绝对 working-path 在目录覆盖规则下存在路径兼容问题。可用参数以该版本的 `--help` 和[官方文档](https://github.com/juraj-hrivnak/Pakku/tree/v1.5.0/docs/topics)为准。
 
