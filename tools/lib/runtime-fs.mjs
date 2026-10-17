@@ -2,8 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { relativePath, safePath } from './workspace.mjs';
+import { safePath } from './workspace.mjs';
 import { sha256 } from './pakku.mjs';
+import { managedPath } from './content-policy.mjs';
+export { managedPath } from './content-policy.mjs';
 
 export const pathKey = p => process.platform === 'win32' ? p.toLowerCase() : p;
 export const within = (parent, child) => pathKey(child) === pathKey(parent) || pathKey(child).startsWith(pathKey(parent + path.sep));
@@ -24,14 +26,14 @@ export async function absoluteDirectory(input) {
   }
   return fs.realpath(resolved);
 }
-export function managedPath(name) {
-  relativePath(name);
-  if (name.split('/').some(p => /[<>"|?*]/.test(p) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p))) throw new Error(`不安全 Windows 路径: ${name}`);
-  // Unpacked resource packs own assets; Minecraft's shared assets directory stays protected.
-  const protectedName=name.replace(/(^|\/)(resourcepacks\/[^/]+)\/assets(?=\/|$)/gi,'$1$2/resource-assets');
-  if (/(^|\/)(saves|logs|crash-reports|screenshots|assets|libraries|versions|pcl|\.minecraft|\.git|\.local|\.cache|\.work|\.pakku)(\/|$)|(^|\/)(options.*\.txt|.*accounts.*|.*credentials.*|launcher.*|hmcl.*|modpack\.cfg|.*\.json\.lock|.*\.(exe|dll|bat|cmd|ps1|sh)|\.env(?:\..*)?)$/i.test(protectedName)) throw new Error(`禁止纳管私人/启动器/运行文件: ${name}`);
-  // Version JSON/JAR live at gameDir's root. Config JSON must be in a declared directory.
-  if (!name.includes('/') && /\.(json|jar)$/i.test(name)) throw new Error(`禁止纳管根目录版本文件: ${name}`);
+export function runtimePath(runtime,name) {
+  managedPath(name);
+  const destination=path.resolve(runtime.gameDir,...name.split('/'));
+  const versionId=path.basename(runtime.versionDir);
+  for(const extension of ['json','jar']) {
+    const reserved=path.resolve(runtime.versionDir,versionId+'.'+extension);
+    if(destination.toLowerCase()===reserved.toLowerCase())throw new Error('禁止纳管实际启动器版本文件: '+name);
+  }
   return name;
 }
 export async function fileInfo(root, name) {

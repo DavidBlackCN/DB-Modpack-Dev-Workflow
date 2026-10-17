@@ -138,7 +138,7 @@ test('junction 越界、硬链接、只读文件和受保护路径均拒绝',asy
   await fs.chmod(path.join(f.gameDir,'config/db-example.json'),0o644);
   await fs.link(path.join(f.gameDir,'client-note.txt'),path.join(outside,'hardlink'));
   await assert.rejects(deploy(f.root,f.runtime,f.target,stopped),/独立文件/);
-  for(const name of ['../escape','saves/world/data','options.txt','Example.json','PCL/Setup.ini','hmclversion.cfg','config/CON','config/x:stream'])assert.throws(()=>managedPath(name));
+  for(const name of ['../escape','saves/world/data','PCL/Setup.ini','hmclversion.cfg','config/CON','config/x:stream'])assert.throws(()=>managedPath(name));
 });
 test('依赖缓存校验/下载失败不会写 Runtime，服务端依赖不进入客户端',async t=>{
   const f=await setup(t);const bytes=Buffer.from('safe fake jar bytes, never executed');

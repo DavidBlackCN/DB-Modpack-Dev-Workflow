@@ -2,9 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { filesUnder, readJson, relativePath, safePath } from './workspace.mjs';
 import { pakku, requireSuccess } from './pakku.mjs';
-import { managedPath } from './runtime-fs.mjs';
+import { managedPath, publicContent } from './content-policy.mjs';
 
-const forbidden = /(^|\/)(saves|logs|crash-reports|screenshots|libraries|node_modules|versions|\.git|\.local|\.cache|\.work)(\/|$)|(^|\/)(options\.txt|.*credentials.*|.*accounts.*|\.env(?:\..*)?|.*\.(?:log|pem|key))$/i;
 const runtime = /^(?:build\/|\.pakku\/(shelf|remote|docs|exports)(\/|$))/;
 export async function inspectTarget(root, target) {
   const dir = await safePath(root, target.path);
@@ -12,9 +11,10 @@ export async function inspectTarget(root, target) {
   const source = files.filter(f => !runtime.test(f));
   for (const file of source) {
     relativePath(file);
-    if (forbidden.test(file)) throw new Error(`疑似私密/运行时/未批准二进制文件: ${target.id}/${file}`);
+    const contentPath=file.replace(/^\.pakku\/(?:(?:overrides|client-overrides|server-overrides)\/)?/,'');
+    managedPath(contentPath);
     const text = await fs.readFile(path.join(dir, file));
-    if (/-----BEGIN .*PRIVATE KEY-----|"(?:accessToken|refreshToken|curseforge_api_key)"\s*:/i.test(text.toString('utf8'))) throw new Error(`疑似凭据: ${file}`);
+    publicContent(text,file);
   }
   const config = await readJson(path.join(dir, 'pakku.json'));
   const lock = await readJson(path.join(dir, 'pakku-lock.json'));
@@ -23,11 +23,10 @@ export async function inspectTarget(root, target) {
   if (![1,2].includes(lock.lockfile_version) || !['modrinth','curseforge','multiplatform'].includes(lock.target) || !Array.isArray(lock.mc_versions) || !lock.mc_versions.length || lock.mc_versions.some(v => typeof v !== 'string') || !lock.loaders || typeof lock.loaders !== 'object' || Array.isArray(lock.loaders) || Object.values(lock.loaders).some(v => typeof v !== 'string' || !v)) throw new Error('Pakku 锁数据无效');
   if (lock.projects !== undefined && !Array.isArray(lock.projects)) throw new Error('Pakku projects 必须是数组');
   for (const value of Object.values(config.paths ?? {})) relativePath(value);
-  // A conservative Phase 1 boundary: exact files/directories only. Pakku itself supports richer globs.
+  // Exact mappings keep source hashing and export validation consistent.
   const output = new Map(), mapping = [];
   const claim = (side, destination, origin) => {
     managedPath(destination);
-    if (forbidden.test(destination)) throw new Error(`禁止发布路径: ${destination}`);
     for (const scope of side === 'common' ? ['client','server'] : [side]) {
       const key = `${scope}/${destination}`.toLowerCase();
       const previous = output.get(key);

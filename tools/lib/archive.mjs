@@ -1,6 +1,5 @@
 import { unzipSync } from 'fflate';
-import { relativePath } from './workspace.mjs';
-import { managedPath } from './runtime-fs.mjs';
+import { managedPath, portablePath, publicContent } from './content-policy.mjs';
 
 const table=Uint32Array.from({length:256},(_,n)=>{for(let i=0;i<8;i++)n=n&1?0xedb88320^(n>>>1):n>>>1;return n>>>0;});
 export function crc32(bytes) {let c=0xffffffff;for(const b of bytes)c=table[(c^b)&255]^(c>>>8);return (c^0xffffffff)>>>0;}
@@ -18,7 +17,7 @@ export function inspectZip(input) {
     const flags=bytes.readUInt16LE(cursor+8),method=bytes.readUInt16LE(cursor+10),crc=bytes.readUInt32LE(cursor+16),compressed=bytes.readUInt32LE(cursor+20),length=bytes.readUInt32LE(cursor+24),n=bytes.readUInt16LE(cursor+28),extra=bytes.readUInt16LE(cursor+30),comment=bytes.readUInt16LE(cursor+32),offset=bytes.readUInt32LE(cursor+42);
     if(cursor+46+n+extra+comment>end||flags&1||![0,8].includes(method)||bytes.readUInt16LE(cursor+34)!==0)throw new Error('ZIP 编码/加密/压缩方式不受支持');
     const nameBytes=bytes.subarray(cursor+46,cursor+46+n),name=new TextDecoder('utf-8',{fatal:true}).decode(nameBytes),plain=name.replace(/\/$/,'');
-    relativePath(plain);managedPath('archive/'+plain);
+    portablePath(plain);
     const key=plain.toLowerCase();
     if(names.has(key))throw new Error('ZIP 重复/大小写冲突路径');
     names.set(key,name.endsWith('/'));
@@ -50,7 +49,7 @@ export function inspectArchive(bytes,kind) {
       if(!match)throw new Error(`MRPACK 未知内容: ${name}`);
       if(match[2]) {
         managedPath(match[2].replace(/\/$/,''));
-        if(/\.(pem|key|log)$/i.test(match[2]))throw new Error('禁止导入私密/运行时文件');
+        if(!name.endsWith('/'))publicContent(entries[name],name);
       }
     }
   }

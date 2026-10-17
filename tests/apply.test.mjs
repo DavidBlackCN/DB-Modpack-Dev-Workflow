@@ -68,7 +68,7 @@ test('ZIP 拒绝重复大小写、文件目录冲突、符号链接、CRC 损坏
 });
 test('MRPACK 所有侧别均检查私人路径/未知内容/重复索引/HTTP 下载',async t=>{
   const f=await setup(t);
-  const bad=await bundleFor(f,e=>e['server-overrides/options.txt']=strToU8('private'));assert.throws(()=>inspectArchive(bad.bytes,'modrinth'),/禁止/);
+  const bad=await bundleFor(f,e=>e['server-overrides/launcher_accounts.json']=strToU8('private'));assert.throws(()=>inspectArchive(bad.bytes,'modrinth'),/禁止/);
   const unknown=await bundleFor(f,e=>e['unexplained.txt']=strToU8('x'));assert.throws(()=>inspectArchive(unknown.bytes,'modrinth'),/未知/);
   const invalid=await bundleFor(f,(_e,i)=>i.files.push({path:'mods/a.jar',hashes:{sha512:'a'.repeat(128),sha1:'b'.repeat(40)},fileSize:0,downloads:['http://example.invalid/a.jar']}));
   await assert.rejects(apply(f.root,f.runtime,f.target,{file:invalid.file,...stopped}),/HTTPS/);
@@ -190,4 +190,20 @@ for(const id of ['fabric-1.21.1','neoforge-1.21.1'])test(`${id} 支持 Tag 校�
   await apply(f.root,f.runtime,f.target,{...options,confirm:true,sha256:digest(bundle.bytes)});
   const baseline=JSON.parse(await fs.readFile(await localPath(f.root,`runtimes/${f.runtime.key}/baseline.json`)));
   assert.equal(baseline.targetId,id);assert.equal(baseline.source.tag,tag);
+});
+
+test('Apply 支持默认 options、根目录配置和脚本，但不能触碰实际启动器版本 JSON',async t=>{
+  const f=await setup(t);
+  const bundle=await bundleFor(f,e=>{
+    e['client-overrides/options.txt']=strToU8('fov:85\n');
+    e['client-overrides/custom.json']=strToU8('{}');
+    e['overrides/scripts/helper.sh']=strToU8('echo authored\n');
+  });
+  await apply(f.root,f.runtime,f.target,{file:bundle.file,sha256:digest(bundle.bytes),confirm:true,...stopped});
+  assert.equal(await fs.readFile(path.join(f.gameDir,'options.txt'),'utf8'),'fov:85\n');
+  assert.equal(await fs.readFile(path.join(f.gameDir,'scripts/helper.sh'),'utf8'),'echo authored\n');
+  const before=await snapshot(f.gameDir);
+  const bad=await bundleFor(f,e=>e['overrides/Example.json']=strToU8('{}'));
+  await assert.rejects(apply(f.root,f.runtime,f.target,{file:bad.file,...stopped}),/实际启动器版本文件/);
+  assert.deepEqual(await snapshot(f.gameDir),before);
 });

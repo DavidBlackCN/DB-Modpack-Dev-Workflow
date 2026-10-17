@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { safePath } from './workspace.mjs';
 import { sourceSnapshot, readPrepared, digest } from './prepare.mjs';
-import { fileInfo, localPath, optionalJson, managedPath } from './runtime-fs.mjs';
+import { fileInfo, localPath, optionalJson, managedPath, runtimePath } from './runtime-fs.mjs';
 import { validateBaseline, checkJournal } from './deploy.mjs';
 import { verifyRuntime } from './runtimes.mjs';
 
@@ -58,7 +58,7 @@ export async function changes(root,runtime,target,{diff=false}={}) {
   const managed=[],conflicts=[],candidates=[],dependencies=[];
   const names=new Set([...mapping.keys(),...[...old.values()].filter(f=>f.kind==='override').map(f=>f.path)]);
   for(const name of [...names].sort()) {
-    managedPath(name);
+    runtimePath(runtime,name);
     const b=old.get(name),m=mapping.get(name);
     if(b && b.kind!=='override')continue;
     const r=await fileInfo(runtime.gameDir,name);
@@ -108,7 +108,7 @@ export async function changes(root,runtime,target,{diff=false}={}) {
     if(diff)item.diff=textDiff(null,bytes);
     candidates.push(item);
   }
-  return {runtime:runtime.id,targetId:target.id,sourceFingerprint:info.fingerprint,baseline:baseline?.source??null,managed,conflicts,candidates,dependencies,dependencySource,privateData:'options、存档、账户、截图、日志不遍历、不回收'};
+  return {runtime:runtime.id,targetId:target.id,sourceFingerprint:info.fingerprint,baseline:baseline?.source??null,managed,conflicts,candidates,dependencies,dependencySource,privateData:'未声明的 options 不自动发现；存档、账户、截图、日志不遍历、不回收'};
 }
 export function formatChanges(report) {
   const rows=[`Runtime ${report.runtime} / Target ${report.targetId}`,`依赖依据: ${report.dependencySource}`,report.privateData];

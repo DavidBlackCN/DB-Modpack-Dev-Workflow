@@ -137,7 +137,7 @@ Pakku 固定版本与 SHA-256 见 [toolchain.json](../toolchain.json)。独立�
 
 客户端同名覆盖文件优先于公共文件。示例中的 `config/db-example.json` 演示普通目录规则，`db-client.json` 和 `db-server.json` 演示两侧覆盖。调整文件位置时同步更新规则，避免引用已删除路径。
 
-模板检查器只接受明确的文件或目录规则，不支持 glob 通配符；源目录不接受 JAR。不要将游戏目录整体复制为源工程。复用已有整合包时，通过 Pakku 添加依赖，再逐项复制需要分发的配置和资源。
+模板检查器只接受明确的文件或目录规则，不支持 glob 通配符；需要随包分发的本地 JAR 应放入正式 overrides。不要将游戏目录整体复制为源工程。复用已有整合包时，通过 Pakku 添加依赖，再逐项复制需要分发的配置和资源。
 
 ## 检查与构建
 
@@ -168,6 +168,33 @@ pnpm run mp -- build --target neoforge-1.21.1
 - `.pakku/server-overrides/mods/local-server.jar`：仅服务端 Mod。
 - 解包资源包也可放在 `.pakku/client-overrides/resourcepacks/<包名>/`，其中的 `assets/` 会保留。
 
-这些目录下的 JAR、ZIP、MRPACK 可正常加入 Git；只保存确实需要分发且拥有分发许可的资源。Pakku 在构建时打包，Workspace 核对内容哈希。客户端、公共和服务端内容继续分别处理，不会无条件合并。资源文件不进入 Pakku 托管依赖列表，不支持自动更新；更新时替换仓库中的文件，再检查、构建和同步。Runtime Import 跳过已由 overrides 管理的 Mod 路径，Collect 仍不自动回收 JAR 或归档。
+这些目录下明确维护的资源和配置可正常加入 Git；只保存确实需要分发且拥有分发许可的资源。Pakku 在构建时打包，Workspace 核对内容哈希。客户端、公共和服务端内容继续分别处理，不会无条件合并。资源文件不进入 Pakku 托管依赖列表，不支持自动更新；更新时替换仓库中的文件，再检查、构建和同步。Runtime Import 跳过已由 overrides 管理的 Mod 路径，Collect 仍不自动回收 JAR 或归档。
 
 也可用 Pakku 的 overrides 配置明确声明其他源目录；Git 默认归档例外仅覆盖上述标准目录，自定义位置需自行添加精确的 `.gitignore` 例外。未声明的散落归档、工具缓存和构建产物仍不作为源资源。游戏根目录的 assets、存档、账户、凭据、启动器文件及路径穿越仍受保护。归档大小限制见上文；本地检查和构建通过不代表托管平台已批准发布，上传时仍需符合平台的分发规则。
+
+## 内容与安全边界
+
+正式 overrides 表示作者明确选择分发的内容，与 Runtime 中自动发现的玩家文件分开处理。路径与内容规则集中在 `tools/lib/content-policy.mjs`；检查、归档导入、同步和回收复用这些规则。
+
+| 内容或操作 | 当前策略 |
+| --- | --- |
+| 默认游戏设置 | 允许 `options.txt`、`optionsof.txt`、`optionsshaders.txt`，推荐放入 `.pakku/client-overrides/` |
+| 配置与脚本 | 允许根目录 JSON、`server.properties`、`servers.dat`、KubeJS、CraftTweaker、启动脚本及辅助二进制；模板只复制/打包，不执行这些文件 |
+| 本地资源 | 允许 JAR、ZIP、图片、公开证书等；不单凭扩展名或 accounts/launcher/hmcl 等关键词拒绝 |
+| 模板与示例目录 | 允许 `config/template/assets/`、`config/template/saves/` 和资源包内部 assets；不等于允许覆盖玩家根目录的同名目录 |
+| 玩家与启动器目录 | 游戏根目录的 saves、logs、crash-reports、screenshots、assets、libraries、versions、PCL、HMCL、.minecraft 不纳管 |
+| 内部目录 | 任意层级的 .git、.local、.cache、.work、.pakku、node_modules 不作为游戏内容分发 |
+| 账户与凭据 | 任意层级的 .env / .env.*、accounts.json、launcher_accounts.json、credentials / credentials.json 拒绝；文本中的非空访问令牌、API 密钥字段和 PEM 私钥拒绝，空字段及公开证书允许 |
+| 启动器和运行记录 | 根目录 launcher_profiles.json、launcher_settings.json、hmclversion.cfg、hmcl.json、modpack.cfg、usercache.json、usernamecache.json、session.lock 拒绝；实例实际版本 JSON/JAR 在同步和恢复时按路径保护 |
+| 路径与文件系统 | 拒绝越界、绝对路径、Windows 保留名、大小写输出冲突、符号链接和 junction；Runtime 文件还需是非硬链接的普通文件 |
+| 未声明的源归档 | 散落 JAR/ZIP/MRPACK 不作为正式源；需放入 overrides 或通过明确的 Pakku overrides 规则声明 |
+
+Git 默认收录标准 overrides 中的作者内容，但仍忽略上述私人/内部路径。自定义 overrides 源目录如被全局忽略规则命中，需添加精确的 Git 例外。Git 忽略不是安全校验的替代品；凭据检测也不是完整的敏感信息扫描。
+
+**默认设置的开发流程**：把筛选后的设置写入 `.pakku/client-overrides/options.txt`，检查并构建，再同步。实例中已有不同内容时报告冲突，不自动覆盖；只有完全相同的文件可经明确确认接管。首次成功同步后，游戏修改这些设置会在 Changes 中显示；可确认 Collect 回收文本，或人工协调后继续同步。模板不会把未声明的玩家 options 自动发现为新候选。
+
+**回收范围**：已映射的公共/客户端文本均可审查回收，包括根目录设置和脚本；新文件仍只从 config 自动发现，且必须明确选择来源。Collect 仍限制为不超过 256 KiB 的 UTF-8 文本，不回收 JAR/ZIP/MRPACK，不自动回收二进制；大型文本或二进制资源由作者直接更新项目。删除需额外确认，双方同时修改保持冲突保护。
+
+**格式与工具边界**：MRPACK 创建工程目前只支持格式 1、单个已知 Loader 和 Modrinth 目标；索引依赖必须由 Pakku 唯一识别并保持哈希、路径、大小和侧别，optional 侧别、未知字段、重复项目或无法转换的索引项会阻止注册。内嵌 overrides 原样保留并核对导出。override 声明不支持 glob，归档大小/ZIP64/加密限制见上文；索引下载要求无凭据 HTTPS 和可信哈希。
+
+**写入边界**：只写明确绑定且版本匹配的隔离实例；不支持共享游戏目录。所有写入仍要求游戏停止，保留冲突检查、备份、日志和恢复；失败不提前更新成功基线。Apply 需要本次包哈希确认，远端来源继续校验报告与提交身份。未知文件不会被清理，脚本和游戏不会被自动启动。

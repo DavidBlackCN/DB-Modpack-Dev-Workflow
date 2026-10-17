@@ -1,3 +1,4 @@
+import { publicContent } from './content-policy.mjs';
 import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -56,13 +57,13 @@ export async function collect(root,runtime,target,options={}) {
       if(!['.pakku/overrides/','.pakku/client-overrides/'].some(p=>source===p+options.file))throw new Error('新 config 候选必须 --source .pakku/client-overrides/<原路径> 或 .pakku/overrides/<原路径>');
       if(candidate.binary)throw new Error('二进制新候选需独立许可/内容审查，不自动回收');
     } else throw new Error('文件不可回收（冲突、依赖或私人文件）');
-    if(/\.(jar|zip|mrpack|log|pem|key)$/i.test(source))throw new Error('不回收 JAR、归档或私密文件');
+    if(/\.(jar|zip|mrpack)$/i.test(source))throw new Error('不回收 JAR 或归档；请在源工程手动替换');
     const info=await sourceSnapshot(root,target);
     if(candidate && info.mapping.some(m=>m.destination.toLowerCase()===options.file.toLowerCase()))throw new Error('新候选与现有侧别映射重叠，需人工选择');
     const before=await sourceBytes(info.dir,source);
     if(candidate && before)throw new Error('候选来源已存在');
     const ri=await fileInfo(runtime.gameDir,options.file),after=ri?await fs.readFile(ri.file):null;
-    if(after && /-----BEGIN .*PRIVATE KEY-----|"(?:accessToken|refreshToken|curseforge_api_key)"\s*:/i.test(after.toString('utf8')))throw new Error('疑似凭据，拒绝回收');
+    if(after)publicContent(after,source);
     if(after && textContent(after)===null)throw new Error('二进制/过大内容需人工审查，不自动回收');
     if(!after && info.config && ['overrides','client_overrides','server_overrides'].some(k=>(info.config[k]??[]).some(rule=>source===rule || (source.startsWith(rule+'/') && info.source.filter(f=>f.startsWith(rule+'/')).length===1))))throw new Error('删除会使显式 override 规则为空，请人工同时调整规则');
     await assertStopped(runtime.gameDir,options.stopped,options.probe);

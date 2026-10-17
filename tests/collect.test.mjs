@@ -135,3 +135,26 @@ test('轻量 Status 只读本地元数据，游戏目录离线时也不扫描或
   assert.match((await status(f.root,workspace)).runtimes[0].error,/检查失败/);
   assert.deepEqual(await snapshot(f.base),before);
 });
+
+test('明确纳管 options 和根目录配置可同步回收；未知设置、冲突和恢复仍受保护',async t=>{
+  const f=await setup(t),options='options.txt',origin='.pakku/client-overrides/options.txt';
+  await save(src(f,origin),'fov:80\n');await save(src(f,'.pakku/client-overrides/custom-settings.json'),'{}');
+  await save(game(f,options),'fov:90\n');await f.stage();
+  await assert.rejects(deploy(f.root,f.runtime,f.target,stopped),/冲突/);
+  assert.equal(await fs.readFile(game(f,options),'utf8'),'fov:90\n');
+  await fs.unlink(game(f,options));
+  await deploy(f.root,f.runtime,f.target,stopped);
+  await fs.writeFile(game(f,options),'fov:95\n');
+  assert.equal(get(await report(f),options).state,'runtime-only');
+  await assert.rejects(deploy(f.root,f.runtime,f.target,stopped),/冲突/);
+  await collect(f.root,f.runtime,f.target,{...stopped,confirm:true,file:options});
+  assert.equal(await fs.readFile(src(f,origin),'utf8'),'fov:95\n');
+  await f.stage();await deploy(f.root,f.runtime,f.target,stopped);
+  await fs.writeFile(src(f,origin),'fov:100\n');await f.stage();
+  await assert.rejects(deploy(f.root,f.runtime,f.target,{...stopped,beforeWrite:change=>{if(change.path===options)throw Error('options interruption');}}),/recover/);
+  await recover(f.root,f.runtime,stopped);
+  assert.equal(await fs.readFile(game(f,options),'utf8'),'fov:95\n');
+  await save(game(f,'optionsof.txt'),'personal');
+  assert.ok(!(await report(f)).candidates.some(item=>item.path==='optionsof.txt'));
+  await assert.rejects(collect(f.root,f.runtime,f.target,{...stopped,confirm:true,file:'optionsof.txt',source:'.pakku/client-overrides/optionsof.txt'}),/不可回收/);
+});

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { safePath } from './workspace.mjs';
 import { digest, prepare, readPrepared, sourceSnapshot, cachedBytes, obtainBytes } from './prepare.mjs';
-import { fileInfo, managedPath, localPath, atomicJson, optionalJson, lockOperation } from './runtime-fs.mjs';
+import { fileInfo, runtimePath, localPath, atomicJson, optionalJson, lockOperation } from './runtime-fs.mjs';
 import { verifyRuntime } from './runtimes.mjs';
 import { assertStopped, probeProcesses } from './processes.mjs';
 
@@ -19,7 +19,7 @@ export function validateBaseline(baseline,runtime) {
   if(!baseline)return;
   if(baseline.schema!==1||baseline.key!==runtime.key||baseline.targetId!==runtime.targetId||!Array.isArray(baseline.files))throw new Error('成功基线身份不匹配');
   for(const file of baseline.files) {
-    managedPath(file.path);
+    runtimePath(runtime,file.path);
     if(!['sha256','sha512'].includes(file.algorithm)||!new RegExp(`^[a-f0-9]{${file.algorithm==='sha512'?128:64}}$`).test(file.hash))throw new Error('成功基线哈希无效');
   }
 }
@@ -31,6 +31,7 @@ export async function planDeployment(root,runtime,prepared,options={}) {
   const desired=new Map(prepared.files.map(f=>[f.path,f]));
   const spelling=new Map();
   for(const name of [...old.keys(),...desired.keys()]) {
+    runtimePath(runtime,name);
     const key=name.toLowerCase();
     if(spelling.has(key)&&spelling.get(key)!==name)throw new Error('仅大小写不同的部署路径冲突，请分步移除后添加');
     spelling.set(key,name);
@@ -74,7 +75,7 @@ export async function planDeployment(root,runtime,prepared,options={}) {
     }
   }
   for(const prefix of ['mods','config','resourcepacks','shaderpacks','kubejs','scripts','defaultconfigs'])await inventory(prefix);
-  return {runtime:runtime.id,key:runtime.key,targetId:runtime.targetId,source:prepared.fingerprint,actions,conflicts,unchanged,adopt,downloads,preserved:preserved.sort(),privateFiles:'存档、日志、账户、个人选项不纳管，也不遍历',baseline};
+  return {runtime:runtime.id,key:runtime.key,targetId:runtime.targetId,source:prepared.fingerprint,actions,conflicts,unchanged,adopt,downloads,preserved:preserved.sort(),privateFiles:'存档、日志和账户不纳管；未声明的个人设置不遍历、不接管',baseline};
 }
 function publicPlan(plan) { const {baseline,...report}=plan;return report; }
 async function journalPath(root,runtime) { return localPath(root,`runtimes/${runtime.key}/journal.json`); }
@@ -177,7 +178,7 @@ export async function recover(root,runtime,options={}) {
     const transaction=await localPath(root,`runtimes/${runtime.key}/transactions/${journal.id}`);
     // Preflight ALL files before rollback. Never overwrite newer game/user edits.
     for(const change of journal.changes) {
-      managedPath(change.path);
+      runtimePath(runtime,change.path);
       if(!['add','update','delete'].includes(change.type) || [change.before,change.afterSha256].some(h=>h!==null&&!/^[a-f0-9]{64}$/.test(h)))throw new Error('journal 变更或哈希无效');
       const current=await fileInfo(runtime.gameDir,change.path);
       if(![change.before,change.afterSha256].includes(current?.hash??null))throw new Error(`恢复冲突，保留当前文件: ${change.path}`);

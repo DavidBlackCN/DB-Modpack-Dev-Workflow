@@ -140,3 +140,5 @@ pnpm run mp -- import-deps hmcl-dev --selection .local/import-selection.json --j
 当前仅识别默认 `mods/` 根目录下启用的 JAR，单文件上限 256 MiB；禁用文件和子目录文件跳过。已有项目的版本更换、无法被平台识别的本地 Mod，以及会改动已有依赖记录的候选，不在本流程中自动接受。未知来源需自行核实后通过常规 Pakku 入口管理。识别依赖联网及对应平台可用性；本模板实际验证的是 Modrinth。
 
 绑定名称仅允许小写字母、数字、`-`、`_`，且以字母或数字开头，例如 `pcl2-debug`、`hmcl-dev`。目标名可以含句点，实例绑定名不能含句点；菜单会在输入时提示重新填写。
+
+默认游戏设置可放入 `.pakku/client-overrides/options.txt`。仅作者明确声明并成功同步的设置进入 Changes/Collect；已有不同内容或玩家后续修改仍报告冲突，未声明的个人设置不自动接管。完整边界见[内容与安全边界](DEVELOPMENT.md#内容与安全边界)。
