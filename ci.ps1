@@ -24,7 +24,7 @@ DB Modpack Dev Workflow v2 — 本地开发入口（PowerShell 7.3+）
 
 快捷参数：-Target -Runtime -All -DryRun -Stopped -Confirm -File -Source
           -Java -Launcher -GameDir -VersionDir -ConfirmGameDir -AdoptExisting
-          -Operation -Project -Candidate -AcceptHash -Repo -Run -Release -Sha256 -Delete -Json
+          -Operation -Project -Candidate -AcceptHash -Repo -Run -Release -Sha256 -Selection -Delete -Json
 原生 --参数 同样可用。含空格路径用引号包围；参数按数组传递，不执行输入中的代码。
 直接命令不询问确认，也不会自动加 -Stopped / -Confirm。退出码与 mp 一致。
 高级示例：.\ci.ps1 mp -- pakku --target fabric-1.21.1 -- cfg --name '我的整合包'
@@ -58,9 +58,9 @@ function Convert-DirectArguments([string[]] $Values) {
         '-ConfirmGameDir'='--confirm-game-dir'; '-AdoptExisting'='--adopt-existing'
         '-Operation'='--operation'; '-Project'='--project'; '-Candidate'='--candidate'
         '-AcceptHash'='--accept-hash'; '-Repo'='--repo'; '-Run'='--run'; '-Release'='--release'
-        '-Sha256'='--sha256'; '-Delete'='--delete'; '-Json'='--json'
+        '-Sha256'='--sha256'; '-Selection'='--selection'; '-Delete'='--delete'; '-Json'='--json'
     }
-    $valueFlags = @('--target','--file','--source','--java','--launcher','--game-dir','--version-dir','--operation','--project','--candidate','--accept-hash','--repo','--run','--release','--sha256')
+    $valueFlags = @('--target','--file','--source','--java','--launcher','--game-dir','--version-dir','--operation','--project','--candidate','--accept-hash','--repo','--run','--release','--sha256','--selection')
     $out = [System.Collections.Generic.List[string]]::new()
     $out.Add($Values[0])
     $runtimeName = $null
@@ -229,6 +229,14 @@ function Show-Summary($Result) {
             Write-Host "现有 Mod/配置: $(@($record.existing).Count) 个（不自动接管）"
         } elseif ($record.action -eq 'apply') {
             Write-Host "目标: $($record.target) | 包版本: $($record.version) | 来源: $($record.provenance.kind)"
+        } elseif ($record.action -eq 'import-batch') {
+            Write-Host "📦 成功识别: $(@($record.recognized).Count) | 跳过: $(@($record.skipped).Count) | 失败: $(@($record.failed).Count) | 待导入项目: $($record.pending)"
+            foreach ($item in $record.recognized) { Write-Host "  ✅ $(Format-DisplayPath $item.path) → $($item.project)" }
+            foreach ($item in $record.skipped) { Write-Host "  ─ $(Format-DisplayPath $item.path)：$($item.reason)" -ForegroundColor DarkGray }
+            foreach ($item in $record.failed) { Write-Host "  ❌ $(Format-DisplayPath $item.path)：$(Format-DisplayPath $item.reason)" -ForegroundColor Red }
+            foreach ($item in $record.added) { Write-Host "  ➕ $($item.name.Values -join ' / ')" }
+            if ($record.blocked) { $script:OperationWarning=$true; Write-Host '⚠️ 本批未导入；排除异常项后重新选择。' -ForegroundColor Yellow }
+            Write-Host '输入 d 可查看 Pakku 日志、完整哈希及 Lock Diff。' -ForegroundColor DarkGray
         } elseif ($record.action -eq 'import-deps') {
             Write-Host "待识别 JAR: $(@($record.candidates).Count) | 已跳过: $(@($record.skipped).Count)"
         } elseif ($record.Contains('managed')) {
@@ -369,23 +377,21 @@ function Invoke-Mods([string] $Choice) {
         $report=$result.Records[-1]
         if (-not $report.candidates.Count) { Write-Host 'ℹ️ 没有需要识别的新增 JAR。'; return }
         $items=Select-Multiple $report.candidates '📥 选择要导入的依赖'
-        $completed=0; $skipped=0
+        if (-not $items.Count) { Write-Host 'ℹ️ 未选择依赖，未导入。'; return }
+        $selection=[IO.Path]::GetTempFileName()
         try {
-            foreach ($item in $items) {
-                Write-Host "📦 识别: $(Format-DisplayPath $item.path)"
-                if (-not (Confirm-Action '使用 Pakku 联网识别此文件并生成临时候选？正式源暂不修改')) { $skipped++; continue }
-                # Generate against the latest source after each acceptance; never reuse stale candidates.
-                $result=Run-Mp ($forward+@('--file',$item.path,'--sha256',$item.hash,'--json'))
-                $candidate=$result.Records[-1]
-                if (-not $candidate.projectPath -or -not $candidate.hash) { throw '未生成有效导入候选。' }
-                if (Confirm-Action '确认新增依赖及许可，将此候选导入项目？可输入 d 审查差异') {
-                    $null=Run-Mp ($forward+@('--candidate',$candidate.id,'--accept-hash',$candidate.hash,'--confirm','--json'))
-                    $completed++
-                } else { $skipped++ }
-            }
-        } finally {
-            Write-Host "📥 导入完成 $completed / $($items.Count) 项，跳过 $skipped 项。已完成项保留，可用 git diff 检查。"
-        }
+            $payload=@($items | ForEach-Object { @{path=$_.path;hash=$_.hash} })
+            [IO.File]::WriteAllText($selection,(ConvertTo-Json -InputObject $payload -Depth 5),[Text.UTF8Encoding]::new($false))
+            Write-Host "⏳ 正在批量识别 $($items.Count) 个 JAR，并校验统一候选；可能需要联网。" -ForegroundColor Cyan
+            $result=Run-Mp ($forward+@('--selection',$selection,'--json'))
+        } finally { Remove-Item -LiteralPath $selection -Force -ErrorAction SilentlyContinue }
+        $candidate=$result.Records[-1]
+        if ($candidate.blocked) { $script:OperationWarning=$true; Write-Host '⚠️ 本批未导入，请排除异常项后重新选择。'; return }
+        if (-not $candidate.projectPath -or -not $candidate.hash) { Write-Host 'ℹ️ 没有待导入依赖。'; return }
+        if (Confirm-Action '确认上述全部新增依赖及许可，一次性导入项目？输入 d 查看完整差异') {
+            $null=Run-Mp ($forward+@('--candidate',$candidate.id,'--accept-hash',$candidate.hash,'--confirm','--json'))
+            Write-Host "📥 已一次性导入 $($candidate.pending) 个 Project；可用 git diff 检查。"
+        } else { Write-Host 'ℹ️ 已取消导入，正式源未修改。' }
     }
 }
 function Invoke-Runtimes([string] $Choice) {

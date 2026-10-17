@@ -114,7 +114,9 @@ pnpm run mp -- recover hmcl-dev --stopped
 
 ## 导入实例新增依赖
 
-“Mod / 依赖管理 → 从实例导入新增依赖”用于将测试实例中新增的 Mod 纳入 Pakku。它与回收配置的 Collect 分开：先列出未匹配当前锁文件的 JAR，多选需要导入的文件，再逐项由 Pakku 按哈希联网识别。菜单显示新增项目摘要，可输入 `d` 查看全部新增依赖和锁文件差异，确认后写入。每次接受后，下一个候选基于最新源生成；出错时停止，之前已接受的项保留。若某个所选文件已随前一个项目的依赖一起导入，请重新扫描列表。
+“Mod / 依赖管理 → 从实例导入新增依赖”用于将测试实例中新增的 Mod 纳入 Pakku，与 Collect 配置回收分开。Space 多选 JAR 后按 Enter，在同一个隔离工程中自动批量识别，展示成功、跳过、失败和待导入数量。输入 `d` 查看完整哈希、Pakku 日志及 Lock Diff；确认一次后，一次性写入候选 Lock，并保存一份旧 Lock 备份。
+
+相同内容的重复 JAR 和已受管依赖会跳过。出现未知来源、版本冲突、哈希变化或完整性检查失败时，整批不写入，也不生成可接受候选；排除异常项后重新选择。已有依赖的核心字段和目标上下文不能改变，已有 `pakku_links` 不能删除，新增 link 只能指向本次新增 Project。
 
 ```powershell
 pnpm run mp -- import-deps hmcl-dev --json
@@ -123,7 +125,15 @@ pnpm run mp -- import-deps hmcl-dev --candidate <候选ID> --accept-hash <候选
 git diff -- packs/
 ```
 
-识别在 `.work/` 副本调用 Pakku 1.5.0 的 `sync --additions`。确认前不修改正式源；确认后仅写回原生 `pakku-lock.json`，保存原锁文件备份，不复制 JAR 到源工程、不修改游戏目录。导入可能包含 Pakku 自动解析的依赖，须一并审查许可和差异。源文件、绑定或所选 JAR 在审查后变化时，需要重新识别。
+批量 CLI 使用选择清单，内容为 `[{"path":"mods/example.jar","hash":"扫描结果中的SHA256"}, ...]`，可保存在 `.local/import-selection.json`，然后执行：
+
+```powershell
+pnpm run mp -- import-deps hmcl-dev --selection .local/import-selection.json --json
+```
+
+清单必须显式列出文件与扫描哈希，不能与 `--file` / `--sha256` 混用。生成后仍使用上面的 `--candidate` / `--accept-hash` / `--confirm` 接受；单文件命令保持兼容。批量结果中 `pending` 是待加入的 Project 数量（可能包含 Pakku 解析的附加依赖）；`blocked: true` 表示整批被阻止，CLI 返回非零退出码。
+
+识别在 `.work/` 副本调用 Pakku 1.5.0 的 `sync --additions`。确认前不修改正式源；确认后仅写回原生 `pakku-lock.json`，保存原锁文件备份，不复制 JAR 到源工程、不修改游戏目录。导入可能包含 Pakku 自动解析的依赖，须一并审查许可和差异。源文件、绑定或任一参与导入的 JAR 在审查后变化时，需要重新识别。写入前再次校验；失败不会逐项提交，已有并发修改不会被回滚覆盖。
 
 当前仅识别默认 `mods/` 根目录下启用的 JAR，单文件上限 256 MiB；禁用文件和子目录文件跳过。已有项目的版本更换、无法被平台识别的本地 Mod，以及会改动已有依赖记录的候选，不在本流程中自动接受。未知来源需自行核实后通过常规 Pakku 入口管理。识别依赖联网及对应平台可用性；本模板实际验证的是 Modrinth。
 
