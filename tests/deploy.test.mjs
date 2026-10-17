@@ -184,3 +184,87 @@ test('Windows 实际 FileShare.Read 锁定文件导致部署失败并可恢复',
   child.stdin.end('\n');await once(child,'exit');
   await recover(f.root,f.runtime,stopped);
 });
+
+async function missingModsFixture(t) {
+  const f=await setup(t);
+  const bytes=Array.from({length:5},(_,i)=>Buffer.from(`fake managed mod ${i}, never executed`));
+  const dependencies=bytes.map((data,i)=>({path:`mods/mod-${i}.jar`,hashes:{sha512:digest(data,'sha512'),sha1:digest(data,'sha1')},downloads:[`https://example.invalid/mod-${i}`],fileSize:data.length}));
+  const download=async url=>new Response(bytes[Number(url.split('-').at(-1))]);
+  await f.stage(dependencies);await deploy(f.root,f.runtime,f.target,{...stopped,download});
+  const baselineFile=await localPath(f.root,`runtimes/${f.runtime.key}/baseline.json`);
+  const remove=async()=>{for(const dep of dependencies)await fs.unlink(path.join(f.gameDir,dep.path));};
+  return {...f,bytes,dependencies,download,baselineFile,remove};
+}
+
+test('删除五个受管 Mod 后整批恢复，缓存与重新下载均校验，配置和未知文件保留',async t=>{
+  const f=await missingModsFixture(t);
+  for(const name of ['mods/private.jar','config/private.json','saves/world/data','options.txt'])await save(path.join(f.gameDir,name),'private');
+  const before=await snapshot(f.gameDir);
+  await f.remove();
+  // Keep three cache entries, redownload two.
+  for(const dep of f.dependencies.slice(0,2))await fs.unlink(path.join(f.root,'.cache/dependencies',dep.hashes.sha512));
+  const absent=await snapshot(f.base);
+  const plan=await deploy(f.root,f.runtime,f.target,{...stopped,dryRun:true});
+  assert.equal(plan.conflicts.length,0);assert.equal(plan.actions.length,5);assert.equal(plan.downloads.length,2);
+  assert.ok(plan.actions.every(a=>a.type==='add'&&a.before===null&&a.reason==='受管依赖缺失，待恢复'));
+  assert.deepEqual(await snapshot(f.base),absent);
+  const downloaded=[];
+  const result=await deploy(f.root,f.runtime,f.target,{...stopped,download:async url=>{downloaded.push(url);return f.download(url);}});
+  assert.equal(result.applied,5);assert.equal(downloaded.length,2);
+  assert.deepEqual(await snapshot(f.gameDir),before);
+  const baseline=JSON.parse(await fs.readFile(f.baselineFile,'utf8'));
+  for(const dep of f.dependencies) {
+    const bytes=await fs.readFile(path.join(f.gameDir,dep.path));
+    assert.equal(digest(bytes,'sha512'),dep.hashes.sha512);assert.equal(digest(bytes,'sha1'),dep.hashes.sha1);
+    assert.equal(baseline.files.find(item=>item.path===dep.path).hash,dep.hashes.sha512);
+  }
+  assert.deepEqual(await deploy(f.root,f.runtime,f.target,stopped),{unchanged:true});
+});
+
+test('缺失 Mod 可恢复但修改 JAR、修改或删除配置仍阻止整批写入',async t=>{
+  for(const kind of ['jar','config-edit','config-delete']) {
+    const f=await missingModsFixture(t);await fs.unlink(path.join(f.gameDir,f.dependencies[0].path));
+    if(kind==='jar')await save(path.join(f.gameDir,f.dependencies[1].path),'modified jar');
+    if(kind==='config-edit')await save(path.join(f.gameDir,'config/db-example.json'),'modified config');
+    if(kind==='config-delete')await fs.unlink(path.join(f.gameDir,'config/db-example.json'));
+    const before=await snapshot(f.base);
+    await assert.rejects(deploy(f.root,f.runtime,f.target,stopped),/冲突/);
+    assert.deepEqual(await snapshot(f.base),before);
+  }
+});
+
+test('缺失依赖缓存损坏或下载校验失败时，不写 Runtime 或提前提交 baseline',async t=>{
+  for(const failure of ['cache','download']) {
+    const f=await missingModsFixture(t);await f.remove();
+    await f.change('new source version');await f.stage(f.dependencies);
+    const cache=path.join(f.root,'.cache/dependencies',f.dependencies[0].hashes.sha512);
+    if(failure==='cache')await fs.writeFile(cache,'corrupt');else await fs.unlink(cache);
+    const before=await snapshot(f.gameDir),baseline=await fs.readFile(f.baselineFile,'utf8');
+    await assert.rejects(deploy(f.root,f.runtime,f.target,{...stopped,download:async()=>new Response(Buffer.alloc(f.bytes[0].length))}),/缓存损坏|下载失败/);
+    assert.deepEqual(await snapshot(f.gameDir),before);assert.equal(await fs.readFile(f.baselineFile,'utf8'),baseline);
+  }
+});
+
+test('缺失依赖恢复中断保留旧 baseline，recover 回到部署前缺失状态后可重试',async t=>{
+  const f=await missingModsFixture(t);await f.remove();
+  const before=await snapshot(f.gameDir),baseline=await fs.readFile(f.baselineFile,'utf8');
+  await f.change('new source version');const prepared=await f.stage(f.dependencies);
+  await assert.rejects(deploy(f.root,f.runtime,f.target,{...stopped,beforeWrite:(change,i)=>{if(change.path==='mods/mod-2.jar')throw Error('restore interrupted');}}),/restore interrupted/);
+  assert.equal(await fs.readFile(f.baselineFile,'utf8'),baseline);
+  assert.equal(digest(await fs.readFile(path.join(f.gameDir,'mods/mod-0.jar')),'sha512'),f.dependencies[0].hashes.sha512);
+  await assert.rejects(deploy(f.root,f.runtime,f.target,stopped),/未完成/);
+  await recover(f.root,f.runtime,stopped);
+  assert.deepEqual(await snapshot(f.gameDir),before);assert.equal(await fs.readFile(f.baselineFile,'utf8'),baseline);
+  await deploy(f.root,f.runtime,f.target,stopped);
+  assert.equal(JSON.parse(await fs.readFile(f.baselineFile,'utf8')).source.fingerprint,prepared.fingerprint);
+});
+
+test('已从源清单移除的缺失 Mod 不恢复，未知文件仍保留',async t=>{
+  const f=await missingModsFixture(t);await f.remove();await save(path.join(f.gameDir,'mods/unknown.jar'),'unknown');
+  await f.stage([]);
+  const plan=await deploy(f.root,f.runtime,f.target,{...stopped,dryRun:true});
+  assert.equal(plan.actions.length,0);assert.equal(plan.conflicts.length,0);
+  await deploy(f.root,f.runtime,f.target,stopped);
+  assert.deepEqual(await fs.readdir(path.join(f.gameDir,'mods')),['unknown.jar']);
+  assert.ok(!JSON.parse(await fs.readFile(f.baselineFile,'utf8')).files.some(item=>item.kind==='dependency'));
+});

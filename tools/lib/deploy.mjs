@@ -48,6 +48,11 @@ export async function planDeployment(root,runtime,prepared,options={}) {
       if(!current)unchanged.push(name);
       else if(matches(current,b))actions.push({path:name,type:'delete',before:current.hashes.sha256,after:null});
       else conflicts.push({path:name,reason:'源已删除，但实例已有本地修改'});
+    } else if(!current && /^mods\/.+\.jar$/i.test(name) &&
+      [b,s].every(file=>['dependency','exported-dependency'].includes(file.kind))) {
+      // Missing managed JARs can be recreated; config deletions remain conflicts.
+      // Keep the existing add transaction so recovery restores the pre-deploy absence.
+      actions.push({path:name,type:'add',before:null,after:s,reason:'受管依赖缺失，待恢复'});
     } else if(matches(current,s))unchanged.push(name);
     else if(matches(current,b))actions.push({path:name,type:'update',before:current.hashes.sha256,after:s});
     else conflicts.push({path:name,reason:'实例偏离上次成功基线（修改或删除），保留并阻止部署'});
