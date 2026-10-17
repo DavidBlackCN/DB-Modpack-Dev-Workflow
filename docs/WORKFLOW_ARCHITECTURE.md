@@ -15,6 +15,8 @@
 
 入口关系为 `ci.ps1 → pnpm run mp -- … → tools/mp.mjs`。菜单读取现有目标、绑定和状态；Target 选择通过 `mp use` 保存，Runtime 选择保留在菜单会话中。部署、回收、备份和构建仍由 Node 核心模块执行。
 
+创建工程由 `create-target` 负责：空白工程确认后调用原生 `init`；MRPACK 经原生 `import` 识别依赖、转换覆盖目录，再导出对照验证。候选在 `.work/`，确认后检查源文件并注册到工作区；此流程不涉及 Runtime。实现位于 `tools/lib/create-project.mjs`，不另建依赖清单。
+
 ## 操作反馈
 
 Node 核心在真实阶段边界发送进度；PowerShell 只负责消费事件、显示摘要、保存详情。菜单为子命令临时设置 `MP_PROGRESS=jsonl`，结束后恢复原值。默认 CLI 和 CI 不启用事件。

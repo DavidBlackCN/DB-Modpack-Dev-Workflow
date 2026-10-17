@@ -11,7 +11,7 @@ export function inspectZip(input) {
   for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(bytes.readUInt32LE(i)===0x06054b50 && i+22+bytes.readUInt16LE(i+20)===bytes.length){end=i;break;}
   if(end<0)throw new Error('ZIP 缺少完整目录');
   const count=bytes.readUInt16LE(end+10),size=bytes.readUInt32LE(end+12),start=bytes.readUInt32LE(end+16);
-  if(bytes.readUInt32LE(end+4)!==0||bytes.readUInt16LE(end+8)!==count||count===65535||!count||count>20000||start+size!==end)throw new Error('不支持分卷/ZIP64 或无效 ZIP 目录');
+  if(bytes.readUInt32LE(end+4)!==0||bytes.readUInt16LE(end+8)!==count||count===65535||count>20000||start+size!==end)throw new Error('不支持分卷/ZIP64 或无效 ZIP 目录');
   const records=[],names=new Map();let cursor=start,total=0;
   for(let i=0;i<count;i++) {
     if(cursor+46>end||bytes.readUInt32LE(cursor)!==0x02014b50)throw new Error('ZIP 目录损坏');

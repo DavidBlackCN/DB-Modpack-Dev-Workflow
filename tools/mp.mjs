@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import {createProject,inspectPack,packSummary} from './lib/create-project.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadWorkspace, selectTarget, safePath } from './lib/workspace.mjs';
@@ -24,6 +25,12 @@ pnpm run mp -- <命令>
   help                         中文帮助
   bootstrap                    显式下载并校验固定 Pakku（可重复）
   doctor                       只读检查 Node/pnpm/Git/Java/Pakku
+  inspect-pack --file <包.mrpack>  只读验证包与转换范围，不绑定 Runtime
+  create-target <id> --name <工程名> --platform modrinth|curseforge|multiplatform
+       --mc <版本> --loader fabric|forge|neoforge|quilt --loader-version <版本>
+       默认预览；--accept-hash <预览哈希> --confirm 才初始化并注册
+       或 --file <包.mrpack> --platform modrinth  生成隔离转换候选
+       --candidate <候选ID> --accept-hash <预览哈希> --confirm  接受工程候选
   targets                      列出所有 Target
   use <id>                     选择本机默认 Target（仅写 .local）
   list [--target <id>]          原生 Pakku ls
@@ -80,26 +87,31 @@ try {
     while (args.length) {
       const arg = args.shift();
       if (arg === '--' && command === 'pakku') { native = args.splice(0); break; }
-      if (['--target','--java','--launcher','--game-dir','--version-dir','--file','--source','--operation','--project','--candidate','--accept-hash','--run','--repo','--release','--sha256','--selection'].includes(arg)) {
+      if (['--target','--java','--launcher','--game-dir','--version-dir','--file','--source','--operation','--project','--candidate','--accept-hash','--run','--repo','--release','--sha256','--selection','--name','--mc','--loader','--loader-version','--platform'].includes(arg)) {
         const value = args.shift();
         if (!value || value.startsWith('--')) throw new Error(`${arg} 缺少值`);
         if (arg === '--target') { if (explicit) throw new Error('重复 --target'); explicit = value; }
-        else {const key={'--java':'java','--launcher':'launcher','--game-dir':'gameDir','--version-dir':'versionDir','--file':'file','--source':'source','--operation':'operation','--project':'project','--candidate':'candidate','--accept-hash':'acceptHash','--run':'run','--repo':'repo','--release':'release','--sha256':'sha256','--selection':'selection'}[arg];if(options[key])throw new Error(`重复 ${arg}`);options[key]=value;}
+        else {const key={'--java':'java','--launcher':'launcher','--game-dir':'gameDir','--version-dir':'versionDir','--file':'file','--source':'source','--operation':'operation','--project':'project','--candidate':'candidate','--accept-hash':'acceptHash','--run':'run','--repo':'repo','--release':'release','--sha256':'sha256','--selection':'selection','--name':'name','--mc':'mc','--loader':'loader','--loader-version':'loaderVersion','--platform':'platform'}[arg];if(options[key])throw new Error(`重复 ${arg}`);options[key]=value;}
       } else if (arg === '--all' && command === 'check') all = true;
       else if (['--dry-run','--confirm-game-dir','--stopped','--adopt-existing','--json','--light','--confirm','--delete'].includes(arg)) options[{'--dry-run':'dryRun','--confirm-game-dir':'confirmGameDir','--stopped':'stopped','--adopt-existing':'adoptExisting','--json':'json','--light':'light','--confirm':'confirm','--delete':'delete'}[arg]]=true;
       else if (arg.startsWith('-')) throw new Error(`未知参数 ${arg}`);
       else positional.push(arg);
     }
     if (all && explicit) throw new Error('--all 与 --target 不能同时使用');
-    if (!['bootstrap','doctor','targets','use','list','add','remove','update','check','build','pakku','prepare','bind','runtimes','unbind','deploy','recover','changes','collect','import-deps','deps-review','deps-accept','restore-deps','dev','status','apply'].includes(command)) throw new Error(`未知命令 ${command}，运行 mp help`);
-    const allowed = {launcher:['bind'],gameDir:['bind'],versionDir:['bind'],dryRun:['bind','deploy','dev','apply'],confirmGameDir:['bind'],stopped:['deploy','recover','dev','collect','restore-deps','apply'],adoptExisting:['deploy','dev','apply'],json:['changes','collect','status','import-deps'],light:['status'],confirm:['collect','import-deps','deps-accept','restore-deps','apply'],delete:['collect'],file:['collect','restore-deps','apply','import-deps'],source:['collect'],operation:['deps-review'],project:['deps-review'],candidate:['deps-accept','import-deps'],acceptHash:['deps-accept','import-deps'],run:['apply'],repo:['apply'],release:['apply'],sha256:['apply','import-deps'],selection:['import-deps']};
+    if (!['create-target','inspect-pack','bootstrap','doctor','targets','use','list','add','remove','update','check','build','pakku','prepare','bind','runtimes','unbind','deploy','recover','changes','collect','import-deps','deps-review','deps-accept','restore-deps','dev','status','apply'].includes(command)) throw new Error(`未知命令 ${command}，运行 mp help`);
+    const allowed = {name:['create-target'],mc:['create-target'],loader:['create-target'],loaderVersion:['create-target'],platform:['create-target'],launcher:['bind'],gameDir:['bind'],versionDir:['bind'],dryRun:['bind','deploy','dev','apply'],confirmGameDir:['bind'],stopped:['deploy','recover','dev','collect','restore-deps','apply'],adoptExisting:['deploy','dev','apply'],json:['changes','collect','status','import-deps'],light:['status'],confirm:['create-target','collect','import-deps','deps-accept','restore-deps','apply'],delete:['collect'],file:['create-target','inspect-pack','collect','restore-deps','apply','import-deps'],source:['collect'],operation:['deps-review'],project:['deps-review'],candidate:['create-target','deps-accept','import-deps'],acceptHash:['create-target','deps-accept','import-deps'],run:['apply'],repo:['apply'],release:['apply'],sha256:['apply','import-deps'],selection:['import-deps']};
     for (const key of Object.keys(options)) if (allowed[key] && !allowed[key].includes(command)) throw new Error(`${command} 不支持 ${key}`);
-    const expected = ['use','add','remove','bind','unbind','deploy','recover','changes','collect','import-deps','deps-review','deps-accept','restore-deps','dev','apply'].includes(command) ? 1 : 0;
+    const expected = ['create-target','use','add','remove','bind','unbind','deploy','recover','changes','collect','import-deps','deps-review','deps-accept','restore-deps','dev','apply'].includes(command) ? 1 : 0;
     if (positional.length !== expected && !(command === 'update' && positional.length <= 1)) throw new Error(`${command} 参数数量错误`);
     const w = await loadWorkspace(root);
     if (explicit && !w.targets.some(t => t.id === explicit)) throw new Error(`未知 Target: ${explicit}`);
     options.report = value => console.log(JSON.stringify(value,null,2));
-    if(command==='status')options.report(await status(root,w,options));
+    if(['create-target','inspect-pack'].includes(command)) {
+      if(explicit)throw new Error('创建工程不使用 --target；请通过位置参数指定新 Target ID');
+      const result=command==='inspect-pack'?packSummary(await inspectPack(options.file)):await createProject(root,positional[0],options);
+      options.report(result);if(result.blocked)process.exitCode=1;
+    }
+    else if(command==='status')options.report(await status(root,w,options));
     else if(['changes','collect','import-deps','deps-review','deps-accept','restore-deps'].includes(command)) {
       const runtime=await getRuntime(root,positional[0]);
       if(explicit && explicit!==runtime.targetId)throw new Error('--target 与 Runtime 绑定不符');
