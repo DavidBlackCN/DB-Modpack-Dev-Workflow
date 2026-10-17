@@ -66,7 +66,7 @@ pnpm run commit
 pnpm run lint:commits
 ```
 
-检查一段提交历史可用 `pnpm run lint:commits -- --from <base> --to HEAD`。提交菜单和规范沿用 [DB-Packwiz-Example-Pack](https://github.com/DavidBlackCN/DB-Packwiz-Example-Pack)，依赖管理与构建使用 [Pakku](https://github.com/juraj-hrivnak/Pakku)。
+默认检查最新一条提交，支持没有父节点的首次提交；尚无提交时明确提示未执行。检查一段提交历史可用 `pnpm run lint:commits -- --from <base> --to HEAD`。提交菜单和规范沿用 [DB-Packwiz-Example-Pack](https://github.com/DavidBlackCN/DB-Packwiz-Example-Pack)，依赖管理与构建使用 [Pakku](https://github.com/juraj-hrivnak/Pakku)。
 
 ## 许可证
 
