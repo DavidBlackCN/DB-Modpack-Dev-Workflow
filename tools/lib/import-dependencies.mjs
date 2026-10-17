@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -81,6 +82,7 @@ export async function importDependencies(root,runtime,target,options={}) {
   if(options.selection!==undefined&&options.files!==undefined)throw new Error('不能重复指定导入列表');
   const requested=options.selection!==undefined?await readJson(path.resolve(root,options.selection)):options.files;
   if(batch&&(!Array.isArray(requested)||!requested.length||requested.some(item=>!item||typeof item.path!=='string'||!/^mods\/[^/]+\.jar$/i.test(item.path)||!/^[a-f0-9]{64}$/.test(item.hash??''))))throw new Error('批量列表需要非空数组，每项包含 mods/<文件>.jar 的 path 与扫描 SHA256 hash');
+  progress('import.scan','正在识别 Runtime 中的新增 JAR');
   const report=await scanImportDependencies(root,runtime,target);
   if(!batch&&!options.file) {if(options.sha256)throw new Error('--sha256 需要 --file');return report;}
   const summary={action:'import-batch',recognized:[],skipped:[],failed:[],pending:0,blocked:false,logs:''};
@@ -123,6 +125,7 @@ export async function importDependencies(root,runtime,target,options={}) {
     // sync serializes pakku.json; restore formatting only when its data is identical.
     if(!isDeepStrictEqual(info.config,await readJson(await safePath(dir,'pakku.json'))))throw new Error('Pakku 修改了项目配置，拒绝导入');
     await fs.writeFile(await safePath(dir,'pakku.json'),originalConfig);
+    progress('import.verify','正在校验候选 Lock 与已有依赖');
     await checkTarget(root,{...target,path:projectPath},options);
     candidate=await sourceSnapshot(root,{...target,path:projectPath});
     summary.diff=textDiff(await sourceBytes(info.dir,'pakku-lock.json'),await sourceBytes(dir,'pakku-lock.json'));

@@ -66,6 +66,7 @@ pnpm run mp -- <命令>
        默认只读预览（远端入口联网读取，需 GH_TOKEN 权限）
        --sha256 <已审查包的 SHA256> --confirm --stopped  才执行
        [--adopt-existing]      只接管内容相同文件；本地包需同目录报告和 SHA256SUMS
+菜单进度：环境变量 MP_PROGRESS=jsonl 启用 stderr 阶段事件，stdout 结果格式不变。
 选项 --java <可执行文件>，或环境 MP_JAVA，默认 PATH 的 java。
 多目标未选择时要求 --target/use；单目标自动选中。bootstrap 之外不隐式下载工具。
 CI 提供预览产物；Release 只创建草稿。不安装或自动启动游戏。

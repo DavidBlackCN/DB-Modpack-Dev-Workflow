@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -53,6 +54,7 @@ export function clientManifest(entries, info) {
   return {dependencies:index.dependencies,files};
 }
 export async function prepare(root,target,options={}) {
+  progress('prepare.check','正在检查目标并准备同步清单');
   const info = await sourceSnapshot(root,target);
   if (!['modrinth','multiplatform'].includes(info.lock.target)) throw new Error('实例同步需要可导出 MRPACK 的 Pakku 目标（modrinth 或 multiplatform）');
   const existing = await readPrepared(root,target,info).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
@@ -65,6 +67,7 @@ export async function prepare(root,target,options={}) {
   const dir=path.join(work,'build','modrinth');
   const names=(await fs.readdir(dir)).filter(n=>n.endsWith('.mrpack'));
   if(names.length!==1)throw new Error('Pakku 未生成唯一 MRPACK');
+  progress('prepare.verify','正在校验客户端清单');
   const bytes=await fs.readFile(path.join(dir,names[0]));
   const entries=inspectArchive(bytes,'modrinth');
   const content=clientManifest(entries,info);

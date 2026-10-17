@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { inspectArchive } from './archive.mjs';
@@ -41,7 +42,9 @@ export async function apply(root,runtime,target,options={}) {
   if(Boolean(options.file)===Boolean(options.run||options.release)||options.run&&options.release)throw new Error('指定且仅指定 --file、--run 或 --release');
   if(options.dryRun && options.confirm)throw new Error('--dry-run 与 --confirm 冲突');
   if(options.file && options.repo)throw new Error('--repo 仅用于远端来源');
+  progress('apply.read','正在读取构建包与来源报告');
   const bundle=options.file?await localBundle(options.file):await downloadArtifact(target.id,options);
+  progress('apply.verify','正在校验构建包、哈希与目标兼容性');
   const report=verifyBundle(bundle,target.id),packageHash=digest(bundle.bytes);
   const snapshot=await sourceSnapshot(root,target);
   if(report.toolchain?.pakku?.version!==snapshot.pakku||report.toolchain?.pakku?.sha256!==(await verifiedTool(root)).sha256)throw new Error('包工具版本/校验信息与模板不符');

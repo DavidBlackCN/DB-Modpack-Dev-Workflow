@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { progress, diagnostic } from './progress.mjs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -57,7 +58,10 @@ export async function pakku(root, targetPath, args, options = {}) {
   const t = await verifiedTool(root);
   // v1.5.0 Glob.walk mixes relative paths with workingPath. Absolute workingPath breaks export.
   // Set the actual cwd explicitly, then pass '.' to retain Pakku's native relative-path semantics.
-  return (options.execute ?? run)(options.java ?? process.env.MP_JAVA ?? 'java', ['-Dfile.encoding=UTF-8', '-jar', t.jar, '--working-path', '.', ...args], { ...options, cwd: targetPath });
+  progress('pakku.wait','正在等待 Pakku 完成');
+  const result = await (options.execute ?? run)(options.java ?? process.env.MP_JAVA ?? 'java', ['-Dfile.encoding=UTF-8', '-jar', t.jar, '--working-path', '.', ...args], { ...options, cwd: targetPath });
+  if(options.capture)diagnostic((result.stdout??'')+(result.stderr??''));
+  return result;
 }
 export function requireSuccess(result) {
   if (result.code !== 0) throw Object.assign(new Error(`工具退出码 ${result.code}: ${result.stderr ?? ''}`), { exitCode: result.code });

@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +11,7 @@ import { assertStopped } from './processes.mjs';
 // Single-file acceptance keeps each approval concrete and each source replacement atomic.
 // Backups are retained even if the process dies after rename; Git is never staged here.
 export async function replaceSource(root,target,name,before,after,metadata,options={}) {
+  progress('source.backup','正在校验并备份选中的源文件');
   const dir=await safePath(root,target.path),dest=await safePath(dir,name);
   const original=await sourceBytes(dir,name);
   if((original?digest(original):null)!==(before?digest(before):null))throw new Error('源文件已变化');
@@ -23,6 +25,7 @@ export async function replaceSource(root,target,name,before,after,metadata,optio
   options.beforeWrite && await options.beforeWrite();
   const now=await sourceBytes(dir,name);
   if((now?digest(now):null)!==record.before)throw new Error('写入前源文件已变化');
+  progress('source.write','正在写入已确认的源文件');
   if(after) {
     await fs.mkdir(path.dirname(dest),{recursive:true});
     const temp=await safePath(dir,`${name}.collect-${id}.tmp`);
@@ -33,6 +36,7 @@ export async function replaceSource(root,target,name,before,after,metadata,optio
   return {collected:name,before:record.before,after:record.after,backup:`.local/collect/${id}`};
 }
 export async function collect(root,runtime,target,options={}) {
+  progress('collect.compare','正在比较配置与源文件');
   const report=await changes(root,runtime,target,{diff:true});options.report?.(report);
   if(!options.confirm)return {preview:true,report};
   if(!options.file)throw new Error('回收需要 --file 明确选择一个文件；不提供全部回收');

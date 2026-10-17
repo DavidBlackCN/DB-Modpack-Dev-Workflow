@@ -15,6 +15,18 @@
 
 入口关系为 `ci.ps1 → pnpm run mp -- … → tools/mp.mjs`。菜单读取现有目标、绑定和状态；Target 选择通过 `mp use` 保存，Runtime 选择保留在菜单会话中。部署、回收、备份和构建仍由 Node 核心模块执行。
 
+## 操作反馈
+
+Node 核心在真实阶段边界发送进度；PowerShell 只负责消费事件、显示摘要、保存详情。菜单为子命令临时设置 `MP_PROGRESS=jsonl`，结束后恢复原值。默认 CLI 和 CI 不启用事件。
+
+启用时 stderr 每行以 `@mp:` 开头，后接 JSON：
+
+```json
+{"schema":1,"type":"progress","stage":"build.verify","message":"正在校验构建产物"}
+```
+
+`diagnostic` 事件的 `text` 保存捕获到的 Pakku 原始输出，仅在详情中展示。换行由 JSON 转义。stdout 的最终结果、普通 stderr 错误和退出码保持原样；无效或未知事件作为普通日志保留。事件不写入源工程、部署记录或候选 Lock。
+
 ## 目录组织
 
 ```text

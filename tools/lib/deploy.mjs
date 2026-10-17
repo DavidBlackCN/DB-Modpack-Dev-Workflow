@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +24,7 @@ export function validateBaseline(baseline,runtime) {
   }
 }
 export async function planDeployment(root,runtime,prepared,options={}) {
+  progress('deploy.plan','正在比较实例文件并生成同步计划');
   const baseline=await optionalJson(await localPath(root,`runtimes/${runtime.key}/baseline.json`));
   validateBaseline(baseline,runtime);
   const old=new Map((baseline?.files??[]).map(f=>[f.path,f]));
@@ -76,6 +78,7 @@ export async function checkJournal(root,runtime) {
   if(journal && !['committed','rolled-back'].includes(journal.status))throw new Error('存在未完成部署，先执行 mp recover <runtime> --stopped');
 }
 export async function deploy(root,runtime,target,options={}) {
+  progress('deploy.check','正在检查 Target 和 Runtime');
   await verifyRuntime(root,runtime,target);
   if(options.dryRun) {
     await checkJournal(root,runtime);
@@ -93,6 +96,7 @@ export async function deploy(root,runtime,target,options={}) {
     let plan=await planDeployment(root,runtime,prepared,options);
     options.report?.(publicPlan(plan));
     if(plan.conflicts.length)throw new Error('存在冲突，未修改任何 Runtime 文件');
+    progress('deploy.download','正在准备需要同步的文件');
     const staged=new Map();
     for(const action of plan.actions.filter(a=>a.after))staged.set(action.path,await obtainBytes(root,prepared,action.after,options.download));
     // Downloads and prompts may take time: recheck both sides and game status before writing.
@@ -113,6 +117,7 @@ export async function deploy(root,runtime,target,options={}) {
     const baseline={schema:1,key:runtime.key,targetId:target.id,source:{kind:'local',fingerprint:prepared.fingerprint,version:prepared.version,git:prepared.git,dirty:prepared.dirty,pakku:prepared.pakku,lockHash:prepared.lockHash,configHash:prepared.configHash,...prepared.provenance},files:prepared.files};
     if(!plan.actions.length && !plan.adopt.length && JSON.stringify(before)===JSON.stringify(baseline))return {unchanged:true};
     const id=randomUUID();
+    progress('deploy.backup','正在备份受影响文件');
     const transaction=await localPath(root,`runtimes/${runtime.key}/transactions/${id}`);
     await fs.mkdir(transaction,{recursive:true});
     const changes=[];
@@ -129,6 +134,7 @@ export async function deploy(root,runtime,target,options={}) {
     const journal={schema:1,id,key:runtime.key,targetId:target.id,status:'applying',beforeBaseline:before,changes,completed:[]};
     await atomicJson(await journalPath(root,runtime),journal);
     try {
+      progress('deploy.write','正在应用文件变化');
       for(const change of changes) {
         await assertStopped(runtime.gameDir,options.stopped,options.probe);
         const now=await fileInfo(runtime.gameDir,change.path);
@@ -157,6 +163,7 @@ export async function deploy(root,runtime,target,options={}) {
   });
 }
 export async function recover(root,runtime,options={}) {
+  progress('recover.check','正在检查未完成的同步与备份');
   return lockOperation(runtime.key,async()=>{
     await assertStopped(runtime.gameDir,options.stopped,options.probe);
     const journal=await optionalJson(await journalPath(root,runtime));
@@ -180,6 +187,7 @@ export async function recover(root,runtime,options={}) {
       }
     }
     options.report?.({action:'recover',files:journal.changes.map(c=>c.path)});
+    progress('recover.write','正在恢复未完成的同步');
     journal.status='rolling-back';await atomicJson(await journalPath(root,runtime),journal);
     for(const change of [...journal.changes].reverse()) {
       await assertStopped(runtime.gameDir,options.stopped,options.probe);

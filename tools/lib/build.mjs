@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { safePath, filesUnder } from './workspace.mjs';
@@ -8,6 +9,7 @@ import { clientManifest, sourceSnapshot, validateDownload } from './prepare.mjs'
 export { inspectArchive } from './archive.mjs';
 
 export async function build(root, target, options = {}) {
+  progress('build.check','正在检查构建目标');
   const info = await checkTarget(root, target, options);
   const snapshot=await sourceSnapshot(root,target);
   const workRoot = await safePath(root, '.work');
@@ -20,6 +22,7 @@ export async function build(root, target, options = {}) {
     await fs.copyFile(path.join(info.dir, file), dest);
   }
   await exportPakku(root,work,options);
+  progress('build.verify','正在校验构建产物');
   const files = await filesUnder(work);
   const found = files.filter(f => /\.(mrpack|zip)$/.test(f));
   const artifacts = [];
@@ -45,6 +48,7 @@ export async function build(root, target, options = {}) {
   }
   if((await sourceSnapshot(root,target)).fingerprint!==snapshot.fingerprint)throw new Error('构建期间源改变，拒绝发布');
   // Unique run directory avoids stale products being mistaken for this build.
+  progress('build.save','正在保存构建产物与报告');
   const outRoot = await safePath(root, `dist/${target.id}`);
   await fs.mkdir(outRoot, { recursive: true });
   const out = await fs.mkdtemp(path.join(outRoot, 'build-'));

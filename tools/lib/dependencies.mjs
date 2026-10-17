@@ -1,3 +1,4 @@
+import { progress } from './progress.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +32,7 @@ export async function reviewDependencies(root,runtime,target,options={}) {
   return {...record,diff:textDiff(before,after),projectPath,notice:'仅生成完整 Pakku 工程副本。人工核实来源、许可及所有依赖变动；不保证与未知本地 JAR 相同。'};
 }
 export async function acceptDependencies(root,target,options={}) {
+  progress('candidate.check','正在复核候选、正式源与导入文件');
   if(!/^[a-f0-9-]{36}$/.test(options.candidate??'')||!options.confirm||!/^[a-f0-9]{64}$/.test(options.acceptHash??''))throw new Error('需要 --candidate <id> --accept-hash <审查的 SHA256> --confirm');
   return lockOperation(runtimeKey(await safePath(root,target.path)),async()=>{
     const base=`.work/candidates/${options.candidate}`,record=await readJson(await safePath(root,`${base}/review.json`));
