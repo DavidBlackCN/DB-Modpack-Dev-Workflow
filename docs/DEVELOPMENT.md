@@ -77,16 +77,34 @@ Remove-Item Env:MP_ICONS -ErrorAction SilentlyContinue
 pnpm run mp -- pakku --target fabric-1.21.1 -- cfg --name My-Pack --version 0.1.0
 ```
 
-新增目标时，先创建空目录，再进入目录执行 Pakku 初始化。例如从仓库根目录运行：
+在主菜单选择“创建整合包工程”（编号 10），可新建空白工程或从本地 MRPACK 转换。这与“启动器 / 实例管理”和“应用 CI / Release 构建”不同：这里只创建 `packs/<Target ID>/` 并注册到 `workspace.json`，不需要游戏目录。
+
+空白工程输入名称、Target ID、Minecraft 版本、Loader 和版本，再选择 Modrinth、CurseForge 或 Multiplatform。版本由用户明确输入；初始包版本为 `0.1.0`。预览只读，确认后调用固定 Pakku 的原生 `init`，检查通过才注册。目录已存在、Target 重复或工作区在确认期间变化时拒绝创建。含 CurseForge 的后续依赖操作可能需要平台凭据。
+
+CLI 也可分两步使用；第二步把 `<预览哈希>` 替换为第一次输出的 `acceptHash`：
 
 ```powershell
-New-Item -ItemType Directory packs/my-pack
-Set-Location packs/my-pack
-java -jar ../../.cache/pakku-1.5.0.jar --working-path . init --name My-Pack --version 0.1.0 --mc-versions 1.21.1 --loaders fabric=0.16.14 --target modrinth
-Set-Location ../..
+pnpm run mp -- create-target my-pack --name My-Pack --mc 1.21.1 --loader fabric --loader-version 0.16.14 --platform modrinth
+pnpm run mp -- create-target my-pack --name My-Pack --mc 1.21.1 --loader fabric --loader-version 0.16.14 --platform modrinth --accept-hash <预览哈希> --confirm
 ```
 
-随后将新目标加入 `workspace.json`，添加配置和资源，运行 check 与 build。这里 Pakku 的 `--target modrinth` 指发布平台；`mp` 的 `--target my-pack` 指目标名称。
+MRPACK 导入先校验文件，再在 `.work/` 生成候选并联网识别依赖。展示转换结果后只确认一次；确认时再次校验原包、候选和工作区，检查通过后才写入正式目录并注册。取消时正式源不变，候选留在可清理的 `.work/create-*/` 中；原包始终只读。
+
+```powershell
+pnpm run mp -- inspect-pack --file 'D:\Downloads\Example.mrpack'
+pnpm run mp -- create-target imported-pack --name Imported-Pack --platform modrinth --file 'D:\Downloads\Example.mrpack'
+pnpm run mp -- create-target imported-pack --candidate <候选ID> --accept-hash <预览哈希> --confirm
+```
+
+转换范围与限制：
+
+- MRPACK v1、Minecraft、单个 Fabric / Forge / NeoForge / Quilt Loader；目前只允许导入为 Modrinth Target，避免跨平台版本匹配改变原文件。
+- 依赖由 Pakku 原生 `import` 按哈希识别；逐项核对 SHA-512、SHA-1，再通过原生 `cfg prj` 设置客户端/服务端侧别并固定版本（`NONE` 更新策略）。不自动补充原包未列出的依赖。下载地址采用 Pakku 识别出的平台地址，不照搬未知来源。
+- 公共、客户端、服务端覆盖文件分别放入 `.pakku/overrides`、`.pakku/client-overrides`、`.pakku/server-overrides`；同名文件保留原来的覆盖优先级。空目录记录会报告为跳过。
+- 转换后实际导出 MRPACK，对照原包的依赖路径、哈希、大小、侧别和覆盖文件内容。无法识别的依赖、内嵌 JAR/ZIP、可选侧别、非标准字段、路径差异或导出漂移会明确报告并阻止整批注册；不会悄悄丢弃内容。先在原包中明确处理这些项目，再重新导入。
+- 初始化、转换或注册失败会清理本次新建内容，保留原工作区；并发修改工作区时停止，不覆盖他人的改动。不要在创建期间手动编辑候选或目标目录。
+
+完成后运行 `mp use <Target ID>`，添加依赖或覆盖资源，并执行 check 与 build。完整转换报告和 Pakku 输出可在菜单按 `d` 查看。这里 Pakku 的 `--target` 指发布平台；创建命令的 `--platform` 明确区分该含义，已有 `mp --target` 仍用于选择工作区目标。
 
 移除目标时，删除清单中的条目并处理对应源目录；若本机选中过它，重新运行 `use`。每个目标独立维护 Minecraft、加载器和 Mod 版本，不通过修改锁文件复制版本组合。
 
@@ -126,7 +144,7 @@ pnpm run mp -- build --target fabric-1.21.1
 pnpm run mp -- build --target neoforge-1.21.1
 ```
 
-`check` 检查目录、覆盖规则、文件边界和 Pakku 数据，不更新依赖。`build` 在 `.work/` 副本执行 export，检查归档内容与覆盖文件哈希后，将结果放入 `dist/<目标名>/build-*/`。失败时保留构建副本，便于查看错误。
+`check` 检查目录、覆盖规则、文件边界和 Pakku 数据，不更新依赖。`build` 在 `.work/` 副本执行 export，检查归档内容与覆盖文件哈希后，将结果放入 `dist/<目标名>/build-*/`。失败时保留构建副本，便于查看错误。空白服务端包可以是合法的空 ZIP；不同平台产物同名时，后收集的产物加平台前缀，避免覆盖。
 
 `build-report.json` 记录目标、Git 提交、文件哈希与 `dirty` 状态；`dirty: true` 表示构建时有未提交改动。本地允许此类构建，CI 发布要求源文件已提交。
 

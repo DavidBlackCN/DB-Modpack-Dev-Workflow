@@ -356,7 +356,15 @@ function Show-Summary($Result) {
             ConvertTo-Json @($record.actions,$record.conflicts,$record.preserved,$record.downloads) -Depth 100 -Compress
         } else { ConvertTo-Json $record -Depth 100 -Compress }
         if (-not $seen.Add($summaryKey)) { continue }
-        if ($record.output) {
+        if ($record.action -in @('inspect-pack','create-project')) {
+            Write-Host "工程: $($record.name) | Target: $($record.target) | Minecraft: $($record.mc) | Loader: $($record.loader) $($record.loaderVersion)"
+            if ($record.directory) { Write-Host "目录: $($record.directory) | 发布平台: $($record.platform)" }
+            Write-Host "依赖: $($record.dependencies) | 已转换: $(@($record.converted).Count) | 覆盖文件: $(@($record.overrides).Count) | 跳过: $(@($record.skipped).Count) | 无法转换: $(@($record.issues).Count)"
+            foreach ($item in $record.issues) { Write-Host "  $(Format-DisplayPath $item.path)：$($item.reason)" -ForegroundColor Yellow }
+            if ($record.created) { Write-Host "创建完成，检查通过。下一步：mp use $($record.target)，添加依赖或编辑覆盖配置，再构建。" }
+            elseif ($record.notice) { Write-Host $record.notice }
+            if (@($record.issues).Count) { $script:OperationWarning=$true }
+        } elseif ($record.output) {
             Write-Host "目标: $($record.target)`n输出: $(Format-DisplayPath $record.output)"
             foreach ($artifact in $record.artifacts) { Write-Host "  $($artifact.kind): $($artifact.name)" }
             Write-Host "报告: $(Format-DisplayPath (Join-Path $record.output 'build-report.json'))"
@@ -711,6 +719,41 @@ function Invoke-Git([string] $Choice) {
         if ($LASTEXITCODE -ne 0) { throw '提交未完成，已暂存文件保留。' }
     }
 }
+function Invoke-CreateProject([string] $Choice) {
+    $forward=@('create-target')
+    if ($Choice -eq '2') {
+        $file=Read-Required '本地 MRPACK 路径'
+        $inspection=Run-Mp @('inspect-pack','--file',$file)
+        if (@($inspection.Records[-1].issues).Count) { Write-Host '请先处理上述无法转换内容，再重新导入。'; return }
+    }
+    $name=Read-Required '工程名称'
+    $id=Read-Required '新 Target ID，例如 my-pack-1.21.1'
+    $forward+=@($id,'--name',$name)
+    if ($Choice -eq '1') {
+        $mc=Read-Required 'Minecraft 版本，例如 1.21.1'
+        Write-Host '  [1] Fabric  [2] NeoForge  [3] Forge  [4] Quilt  [0] 取消'
+        $loader=@{'1'='fabric';'2'='neoforge';'3'='forge';'4'='quilt'}[(Read-Required '选择 Loader')]
+        if (-not $loader) { throw 'Loader 选择无效。' }
+        $loaderVersion=Read-Required 'Loader 版本'
+        $forward+=@('--mc',$mc,'--loader',$loader,'--loader-version',$loaderVersion)
+        Write-Host '  [1] Modrinth  [2] CurseForge  [3] Multiplatform  [0] 取消'
+        $platform=@{'1'='modrinth';'2'='curseforge';'3'='multiplatform'}[(Read-Required '选择发布平台')]
+    } else {
+        Write-Host 'MRPACK 转换目前支持 Modrinth；其他平台不能保证原文件版本一致。'
+        Write-Host '  [1] Modrinth  [0] 取消'
+        if ((Read-Required '选择发布平台') -ne '1') { throw '发布平台选择无效。' }
+        $platform='modrinth';$forward+=@('--file',$file)
+        Write-Host '正在隔离目录中识别依赖并验证转换结果，可能需要联网；尚不注册 Target。'
+    }
+    if (-not $platform) { throw '发布平台选择无效。' }
+    $forward+=@('--platform',$platform)
+    $preview=Run-Mp $forward
+    $candidate=$preview.Records[-1]
+    if ($candidate.blocked -or -not $candidate.acceptHash) { throw '没有可确认的工程预览。' }
+    if (-not (Confirm-Action '确认创建此 Pakku 工程并注册到工作区？')) { Write-Host '已取消创建，未注册 Target。'; return }
+    $accept=if ($candidate.candidate) { @('create-target',$id,'--candidate',$candidate.candidate) } else { $forward }
+    $null=Run-Mp ($accept+@('--accept-hash',$candidate.acceptHash,'--confirm'))
+}
 function Invoke-Advanced {
     Show-Page "$(Get-UiIcon tools) Pakku 高级操作" '逐个输入原生参数，空行结束；输入 0 取消。'
     Require-Target
@@ -748,9 +791,10 @@ function Show-Menu {
     $section=''
     $refresh=$true
     while ($true) {
-        $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon dev) 开发环境","$(Get-UiIcon mod) Mod / 依赖管理","$(Get-UiIcon runtime) 启动器实例管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作")
-        $hints=@('输入编号进入功能页。','选择目标与测试实例；预览只生成计划，不写入游戏目录。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。')
+        $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon dev) 开发环境","$(Get-UiIcon mod) Mod / 依赖管理","$(Get-UiIcon runtime) 启动器 / 实例管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作","$(Get-UiIcon new) 创建整合包工程")
+        $hints=@('输入编号进入功能页。','选择目标与测试实例；预览只生成计划，不写入游戏目录。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。','','创建独立 Pakku Target，不安装游戏或绑定 Runtime。')
         $menus=@{
+            '10'=@('新建空白工程','从已有 MRPACK 导入')
             '1'=@("$(Get-UiIcon dev) 同步到测试实例","$(Get-UiIcon preview) 预览同步变化","$(Get-UiIcon runtime) 切换测试实例","$(Get-UiIcon target) 切换目标","$(Get-UiIcon recover) 恢复失败部署（Recover）")
             '2'=@("$(Get-UiIcon add) 添加 Mod","$(Get-UiIcon remove) 删除 Mod","$(Get-UiIcon refresh) 更新指定 Mod","$(Get-UiIcon refresh) 更新全部 Mod","$(Get-UiIcon list) 查看 Mod 列表","$(Get-UiIcon search) 审查依赖增删","$(Get-UiIcon back) 恢复正式依赖","$(Get-UiIcon import) 从实例导入新增依赖")
             '3'=@("$(Get-UiIcon list) 查看已绑定实例","$(Get-UiIcon bind) 绑定 PCL2 实例","$(Get-UiIcon bind) 绑定 HMCL 实例","$(Get-UiIcon runtime) 切换当前实例","$(Get-UiIcon unbind) 解除绑定")
@@ -766,7 +810,7 @@ function Show-Menu {
         }
         Show-Page $titles[[int]$section] $hints[[int]$section]
         if (-not $section) {
-            for ($i=1; $i -le 9; $i++) {
+            for ($i=1; $i -le 10; $i++) {
                 if ($i -in @(1,5,7)) {
                     $group=@{1='开发与同步';5='构建与应用';7='检查与维护'}[$i]
                     Write-Host "  ── $group ──" -ForegroundColor DarkGray
@@ -804,7 +848,7 @@ function Show-Menu {
             Invoke-MenuOperation { switch ($section) {
                 '1' { Invoke-Development $choice }; '2' { Invoke-Mods $choice }; '3' { Invoke-Runtimes $choice }
                 '4' { Invoke-Collect $choice }; '5' { Invoke-Builds $choice }; '6' { Invoke-Apply $choice }
-                '7' { Invoke-Checks $choice }; '8' { Invoke-Git $choice }
+                '7' { Invoke-Checks $choice }; '8' { Invoke-Git $choice }; '10' { Invoke-CreateProject $choice }
             } }
         } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
     }

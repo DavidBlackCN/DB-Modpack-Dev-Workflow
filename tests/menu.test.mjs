@@ -30,6 +30,9 @@ if(command==='build' && spec.progress) {
 if(command===spec.fail || (spec.failFile && args.includes('--file') && args.includes(spec.failFile))){console.error('fixture failure');process.exit(37);}
 switch(command){
 case 'status':out({selected:spec.selected,gitDirty:true,runtimes:[],targets:spec.targets.map(id=>({id})),bindings:spec.bindings});break;
+case 'inspect-pack':out({action:'inspect-pack',name:'Original',mc:'1.21.1',loader:'fabric',loaderVersion:'0.16.14',dependencies:1,overrides:[],issues:spec.badPack?[{path:'mods/unknown.jar',reason:'无法转换'}]:[]});break;
+case 'create-target':
+  out({action:'create-project',target:id,directory:'packs/'+id,name:'New',mc:'1.21.1',loader:'fabric',loaderVersion:'0.16.14',platform:'modrinth',dependencies:1,converted:[{path:'mods/demo.jar'}],issues:[],created:args.includes('--confirm'),acceptHash:'e'.repeat(64),...(args.includes('--file')?{candidate:'pack-candidate'}:{})});break;
 case 'targets':out(spec.targets.map(id=>({id,path:'packs/'+id,artifacts:['modrinth']})));break;
 case 'runtimes':out({bindings:spec.bindings});break;
 case 'use':spec.selected=id;fs.writeFileSync(process.env.MENU_SPEC,JSON.stringify(spec));out({selected:id});break;
@@ -479,4 +482,28 @@ test('显示配置保存失败不切换、不留下临时文件，并保留上�
   assert.doesNotMatch(tail,/[\uE000-\uF8FF]/u);
   assert.deepEqual(await fs.readdir(dir),['menu.json']);
   assert.match(result.stdout.slice(result.stdout.indexOf('选择显示模式')),/example.mrpack/);
+});
+
+
+test('创建工程入口与实例管理独立，空白工程预览后确认一次，无 Runtime 要求',options,async t=>{
+  const f=await fixture(t,{bindings:[]}),result=await f.execute([],'10\n1\nNew Pack\nnew-pack\n1.21.1\n1\n0.16.14\n1\ny\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);assert.match(result.stdout,/创建整合包工程/);assert.match(result.stdout,/启动器 \/ 实例管理/);
+  const calls=(await f.commands()).filter(a=>a[0]!=='status');assert.equal(calls.length,2);
+  assert.deepEqual(calls[0],['create-target','new-pack','--name','New Pack','--mc','1.21.1','--loader','fabric','--loader-version','0.16.14','--platform','modrinth']);
+  assert.deepEqual(calls[1],[...calls[0],'--accept-hash','e'.repeat(64),'--confirm']);
+  assert.equal((result.stdout.match(/\[y\/N/g)||[]).length,1);assert.match(result.stdout,/按 Enter 继续/);
+});
+test('MRPACK 创建先检查、再展示候选并统一确认；取消及无法转换不注册',options,async t=>{
+  for(const answer of ['y','n']) {
+    const f=await fixture(t,{bindings:[]}),result=await f.execute([],`10\n2\n中文 包.mrpack\nNew\nnew\n1\n${answer}\n\n0\n0\n`);
+    assert.equal(result.code,0,result.stdout+result.stderr);
+    const calls=(await f.commands()).filter(a=>a[0]!=='status');assert.equal(calls.length,answer==='y'?3:2);
+    assert.deepEqual(calls[0],['inspect-pack','--file','中文 包.mrpack']);
+    assert.ok(calls[1].includes('--file'));
+    if(answer==='y')assert.deepEqual(calls[2],['create-target','new','--candidate','pack-candidate','--accept-hash','e'.repeat(64),'--confirm']);
+    assert.ok(!calls.some(a=>['bind','apply','deploy'].includes(a[0])));
+  }
+  const f=await fixture(t,{badPack:true});const result=await f.execute([],'10\n2\nbad.mrpack\n\n0\n0\n');
+  assert.match(result.stdout,/无法转换/);assert.ok(!(await f.commands()).some(a=>a[0]==='create-target'));
+  const cancel=await fixture(t);const nav=await cancel.execute([],'10\n0\n0\n');assert.doesNotMatch(nav.stdout,/按 Enter 继续/);
 });
