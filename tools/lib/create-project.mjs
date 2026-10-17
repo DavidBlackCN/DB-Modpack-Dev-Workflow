@@ -115,7 +115,7 @@ async function convert(root,dir,relative,pack,spec,options) {
   if(report.issues.length)return report;
   const config=await readJson(path.join(dir,'pakku.json'));
   config.description=typeof pack.index.summary==='string'?pack.index.summary:'';
-  config.export_server_side_projects_to_client=true; // Preserve server-only index records with env.client=unsupported.
+  config.export_server_side_projects_to_client=false; // SERVER remains client=unsupported in Pakku 1.5.0.
   await jsonWrite(path.join(dir,'pakku.json'),config);
   for(const item of pack.overrides) {
     const dest=await safePath(dir,item.destination);await fs.mkdir(path.dirname(dest),{recursive:true});
