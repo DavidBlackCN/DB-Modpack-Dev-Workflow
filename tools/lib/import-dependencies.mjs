@@ -31,6 +31,7 @@ function checkImportIntegrity(before,after) {
   };
   const old=index(before),next=index(after),added=[...next.values()].filter(p=>!old.has(p.pakku_id));
   const addedIds=new Set(added.map(p=>p.pakku_id));
+  for(const project of added)if([...next.values()].some(other=>other!==project&&Object.entries(project.id??{}).some(([platform,id])=>id&&other.id?.[platform]===id)))throw new Error('新增依赖与现有或本批 Project 重复，可能存在版本偏离，拒绝接受');
   const links=project=>{
     const values=Object.hasOwn(project,'pakku_links')?project.pakku_links:[];
     if(!Array.isArray(values)||values.some(v=>typeof v!=='string'||!v.trim())||new Set(values).size!==values.length)throw new Error('导入候选 pakku_links 必须是无重复的 Project ID 列表');
@@ -68,41 +69,90 @@ export async function scanImportDependencies(root,runtime,target) {
 
 export async function importDependencies(root,runtime,target,options={}) {
   if(options.candidate) {
-    if(options.file||options.sha256)throw new Error('接受候选不能同时指定 --file / --sha256');
+    if(options.file||options.sha256||options.selection!==undefined||options.files!==undefined)throw new Error('接受候选不能同时指定 --file / --sha256 / --selection');
     if(!/^[a-f0-9-]{36}$/.test(options.candidate))throw new Error('候选 ID 无效');
     const record=await readJson(await safePath(root,`.work/candidates/${options.candidate}/review.json`));
     if(record.importSource?.key!==runtime.key||record.importSource?.runtime!==runtime.id)throw new Error('候选不属于当前导入实例');
     return acceptDependencies(root,target,options);
   }
   if(options.confirm||options.acceptHash)throw new Error('请先生成并审查导入候选，再通过 --candidate / --accept-hash / --confirm 接受');
+  const batch=options.selection!==undefined || options.files!==undefined;
+  if(batch&&(options.file||options.sha256))throw new Error('--selection 不能与 --file / --sha256 同时使用');
+  if(options.selection!==undefined&&options.files!==undefined)throw new Error('不能重复指定导入列表');
+  const requested=options.selection!==undefined?await readJson(path.resolve(root,options.selection)):options.files;
+  if(batch&&(!Array.isArray(requested)||!requested.length||requested.some(item=>!item||typeof item.path!=='string'||!/^mods\/[^/]+\.jar$/i.test(item.path)||!/^[a-f0-9]{64}$/.test(item.hash??''))))throw new Error('批量列表需要非空数组，每项包含 mods/<文件>.jar 的 path 与扫描 SHA256 hash');
   const report=await scanImportDependencies(root,runtime,target);
-  if(!options.file) {if(options.sha256)throw new Error('--sha256 需要 --file');return report;}
-  const selected=report.candidates.find(c=>c.path===options.file);
-  if(!selected||options.sha256!==selected.hash)throw new Error('请选择列表中的新增 JAR，并用 --sha256 确认其扫描哈希');
+  if(!batch&&!options.file) {if(options.sha256)throw new Error('--sha256 需要 --file');return report;}
+  const summary={action:'import-batch',recognized:[],skipped:[],failed:[],pending:0,blocked:false,logs:''};
+  const selected=[],seen=new Set();
+  for(const input of batch?requested:[{path:options.file,hash:options.sha256}]) {
+    const item=report.candidates.find(c=>c.path===input.path);
+    if(!item||input.hash!==item.hash) {
+      if(!batch)throw new Error('请选择列表中的新增 JAR，并用 --sha256 确认其扫描哈希');
+      const skipped=report.skipped.find(c=>c.path===input.path);
+      if(skipped?.reason==='当前 Pakku 锁文件已管理相同内容'&&(await fileInfo(runtime.gameDir,input.path))?.hash===input.hash)summary.skipped.push({...input,reason:skipped.reason});
+      else summary.failed.push({path:input.path,reason:'不在新增候选中或扫描哈希已变化，请重新扫描'});
+      continue;
+    }
+    if(seen.has(item.hash)) {summary.skipped.push({path:item.path,reason:'与本批其他 JAR 内容相同，跳过重复文件'});continue;}
+    selected.push(item);seen.add(item.hash);
+  }
+  if(batch&&(summary.failed.length||!selected.length)) {summary.blocked=summary.failed.length>0;return summary;}
   const info=await sourceSnapshot(root,target),id=randomUUID(),projectPath=`.work/candidates/${id}/project`,dir=await safePath(root,projectPath);
-  // Limit this first implementation to Pakku's default Mod directory.
+  // One isolated native Pakku project and one sync invocation for the entire selection.
   if(info.config.paths?.mods && info.config.paths.mods!=='mods')throw new Error('依赖导入暂只支持默认 mods 路径');
   await fs.mkdir(dir,{recursive:true});
   for(const name of info.source) {const dest=await safePath(dir,name);await fs.mkdir(path.dirname(dest),{recursive:true});await fs.copyFile(path.join(info.dir,name),dest);}
-  const originalConfig=await fs.readFile(path.join(dir,'pakku.json'));
-  const staged=await safePath(dir,'mods/import.jar');await fs.mkdir(path.dirname(staged),{recursive:true});
-  const bytes=await fs.readFile(await safePath(runtime.gameDir,selected.path));
-  if(digest(bytes)!==selected.hash)throw new Error('准备期间 JAR 已变化');
-  await fs.writeFile(staged,bytes,{flag:'wx'});
-  try {requireSuccess(await pakku(root,dir,['--yes','sync','--additions'],{...options,capture:true}));}
-  finally {await fs.unlink(staged);await fs.rmdir(path.dirname(staged)).catch(e=>{if(e.code!=='ENOTEMPTY')throw e;});}
-  // sync also serializes pakku.json; preserve original formatting only when its data is identical.
-  if(!isDeepStrictEqual(info.config,await readJson(await safePath(dir,'pakku.json'))))throw new Error('Pakku 修改了项目配置，拒绝导入');
-  await fs.writeFile(await safePath(dir,'pakku.json'),originalConfig);
-  await checkTarget(root,{...target,path:projectPath},options);
-  const candidate=await sourceSnapshot(root,{...target,path:projectPath});
-  for(const name of new Set([...info.source,...candidate.source]))if(name!=='pakku-lock.json'&&info.hashes[name]!==candidate.hashes[name])throw new Error('Pakku 修改了锁文件之外的源，拒绝导入');
-  const added=checkImportIntegrity(info.lock,candidate.lock);
-  const identified=added.filter(p=>p.type==='MOD'&&(p.files??[]).some(f=>matches(f,selected.hashes)));
-  if(identified.length!==1)throw new Error('Pakku 未唯一识别该新增 Mod；可能来源未知、版本不兼容或项目已被管理。未导入');
-  if((await fileInfo(runtime.gameDir,selected.path))?.hash!==selected.hash)throw new Error('识别期间 JAR 已变化');
+  const originalConfig=await fs.readFile(path.join(dir,'pakku.json')),staged=[];
+  let candidate,added;
+  try {
+    try {
+      for(const [i,item] of selected.entries()) {
+        const dest=await safePath(dir,batch?`mods/import-${i}.jar`:'mods/import.jar');
+        await fs.mkdir(path.dirname(dest),{recursive:true});
+        const bytes=await fs.readFile(await safePath(runtime.gameDir,item.path));
+        if(digest(bytes)!==item.hash)throw new Error(`准备期间 JAR 已变化: ${item.path}`);
+        await fs.writeFile(dest,bytes,{flag:'wx'});staged.push(dest);
+      }
+      const result=await pakku(root,dir,['--yes','sync','--additions'],{...options,capture:true});
+      summary.logs=[result.stdout,result.stderr].filter(Boolean).join('\n');requireSuccess(result);
+    } finally {
+      for(const dest of staged)await fs.unlink(dest);
+      await fs.rmdir(path.join(dir,'mods')).catch(e=>{if(!['ENOTEMPTY','ENOENT'].includes(e.code))throw e;});
+    }
+    // sync serializes pakku.json; restore formatting only when its data is identical.
+    if(!isDeepStrictEqual(info.config,await readJson(await safePath(dir,'pakku.json'))))throw new Error('Pakku 修改了项目配置，拒绝导入');
+    await fs.writeFile(await safePath(dir,'pakku.json'),originalConfig);
+    await checkTarget(root,{...target,path:projectPath},options);
+    candidate=await sourceSnapshot(root,{...target,path:projectPath});
+    summary.diff=textDiff(await sourceBytes(info.dir,'pakku-lock.json'),await sourceBytes(dir,'pakku-lock.json'));
+    for(const name of new Set([...info.source,...candidate.source]))if(name!=='pakku-lock.json'&&info.hashes[name]!==candidate.hashes[name])throw new Error('Pakku 修改了锁文件之外的源，拒绝导入');
+    added=checkImportIntegrity(info.lock,candidate.lock);
+    for(const p of added)for(const file of p.files??[]) {
+      if(file.mc_versions?.length&&!file.mc_versions.some(v=>candidate.lock.mc_versions.includes(v)))throw new Error(`新增依赖 Minecraft 版本不兼容: ${Object.values(p.slug??{}).join(' / ')}`);
+      if(file.loaders?.length&&!file.loaders.some(l=>Object.hasOwn(candidate.lock.loaders,l)))throw new Error(`新增依赖 Loader 不兼容: ${Object.values(p.slug??{}).join(' / ')}`);
+    }
+  } catch(error) {
+    if(!batch)throw error;
+    summary.blocked=true;summary.failed.push(...selected.map(item=>({path:item.path,reason:'整批候选校验失败: '+error.message})));return summary;
+  }
+  const identifiedIds=new Set();
+  for(const item of selected) {
+    const identified=added.filter(p=>p.type==='MOD'&&(p.files??[]).some(f=>matches(f,item.hashes)));
+    let reason;
+    if(identified.length!==1)reason='Pakku 未唯一识别该新增 Mod；可能来源未知、版本不兼容或与已有依赖版本偏离。未导入';
+    else if((await fileInfo(runtime.gameDir,item.path))?.hash!==item.hash)reason='识别期间 JAR 已变化';
+    if(reason) {if(!batch)throw new Error(reason);summary.failed.push({path:item.path,reason});continue;}
+    const p=identified[0];
+    if(identifiedIds.has(p.pakku_id))summary.failed.push({path:item.path,reason:'多个不同内容的 JAR 对应同一 Project，可能版本冲突，请只选择一个版本'});
+    else summary.recognized.push({path:item.path,project:Object.values(p.slug??{}).join(' / '),pakkuId:p.pakku_id});
+    identifiedIds.add(p.pakku_id);
+  }
+  if(summary.failed.length) {summary.blocked=true;return summary;}
+  if((await sourceSnapshot(root,target)).fingerprint!==info.fingerprint)throw new Error('识别期间正式源已变化，请重新生成候选');
   const before=await sourceBytes(info.dir,'pakku-lock.json'),after=await sourceBytes(dir,'pakku-lock.json');
-  const record={schema:1,id,targetId:target.id,sourceFingerprint:info.fingerprint,operation:'import',project:Object.values(identified[0].slug??{}).join(' / '),hash:digest(after),before:digest(before),importSource:{runtime:runtime.id,key:runtime.key,file:selected.path,hash:selected.hash}};
+  const inputs=selected.map(item=>({file:item.path,hash:item.hash}));
+  const record={schema:1,id,targetId:target.id,sourceFingerprint:info.fingerprint,operation:'import',project:summary.recognized.map(p=>p.project).join(' / '),hash:digest(after),before:digest(before),importSource:{runtime:runtime.id,key:runtime.key,...(batch?{files:inputs}:inputs[0])}};
   await atomicJson(await safePath(root,`.work/candidates/${id}/review.json`),record);
-  return {...record,projectPath,added:added.map(p=>({name:p.name,id:p.id,slug:p.slug,files:p.files?.map(f=>({name:f.file_name,id:f.id}))})),diff:textDiff(before,after),notice:'请审查全部新增依赖及许可后接受；只有 Pakku 锁文件会写回正式源。'};
+  return {...(batch?{...summary,pending:added.length}:{}),...record,logs:summary.logs,projectPath,added:added.map(p=>({name:p.name,id:p.id,slug:p.slug,files:p.files?.map(f=>({name:f.file_name,id:f.id}))})),diff:textDiff(before,after),notice:'请审查全部新增依赖及许可后接受；一次写入 Pakku 锁文件并备份，不修改实例 JAR。'};
 }

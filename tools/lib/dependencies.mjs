@@ -42,14 +42,21 @@ export async function acceptDependencies(root,target,options={}) {
     for(const name of new Set([...info.source,...candidate.source]))if(name!=='pakku-lock.json' && info.hashes[name]!==candidate.hashes[name])throw new Error('候选含锁文件以外变化，拒绝接受');
     const after=await sourceBytes(candidate.dir,'pakku-lock.json');
     if(digest(after)!==record.hash||record.hash!==options.acceptHash)throw new Error('候选锁文件哈希已变化');
-    if(record.importSource) {
+    const verifyImportSource=async()=>{if(record.importSource) {
       const input=record.importSource,runtime=await getRuntime(root,input.runtime);
       if(runtime.key!==input.key||runtime.targetId!==target.id)throw new Error('导入来源绑定已变化');
       await verifyRuntime(root,runtime,target);
-      if((await fileInfo(runtime.gameDir,input.file))?.hash!==input.hash)throw new Error('导入来源 JAR 已变化，重新识别');
-    }
+      const files=input.files??[{file:input.file,hash:input.hash}];
+      if(!Array.isArray(files)||!files.length)throw new Error('导入来源列表无效');
+      for(const file of files)if((await fileInfo(runtime.gameDir,file.file))?.hash!==file.hash)throw new Error(`导入来源 JAR 已变化，重新识别: ${file.file}`);
+    }};
+    await verifyImportSource();
     if((await sourceSnapshot(root,target)).fingerprint!==info.fingerprint)throw new Error('验证期间源已变化');
-    return replaceSource(root,target,'pakku-lock.json',await sourceBytes(info.dir,'pakku-lock.json'),after,{operation:'accept-dependencies',candidate:record.id},options);
+    return replaceSource(root,target,'pakku-lock.json',await sourceBytes(info.dir,'pakku-lock.json'),after,{operation:'accept-dependencies',candidate:record.id},{...options,beforeWrite:async()=>{
+      await options.beforeWrite?.();
+      await verifyImportSource();
+      if((await sourceSnapshot(root,target)).fingerprint!==info.fingerprint)throw new Error('写入前源已变化');
+    }});
   });
 }
 

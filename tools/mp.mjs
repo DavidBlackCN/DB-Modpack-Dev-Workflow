@@ -48,6 +48,7 @@ pnpm run mp -- <命令>
        [--delete]             明确接受已受管文件的实例删除
        [--source <源相对路径>] 新 config 候选必须指定 manual override 来源
   import-deps <name> [--json]  列出 Runtime 中未匹配当前锁文件的启用 JAR
+       --selection <JSON文件>  批量生成单一候选，内容为 [{"path":"mods/a.jar","hash":"扫描SHA256"}]
        --file mods/<文件>.jar --sha256 <扫描哈希>  用 Pakku 生成导入候选
        --candidate <id> --accept-hash <候选哈希> --confirm  接受已审查候选
   deps-review <name> --operation add|remove --project <ID/slug>
@@ -78,11 +79,11 @@ try {
     while (args.length) {
       const arg = args.shift();
       if (arg === '--' && command === 'pakku') { native = args.splice(0); break; }
-      if (['--target','--java','--launcher','--game-dir','--version-dir','--file','--source','--operation','--project','--candidate','--accept-hash','--run','--repo','--release','--sha256'].includes(arg)) {
+      if (['--target','--java','--launcher','--game-dir','--version-dir','--file','--source','--operation','--project','--candidate','--accept-hash','--run','--repo','--release','--sha256','--selection'].includes(arg)) {
         const value = args.shift();
         if (!value || value.startsWith('--')) throw new Error(`${arg} 缺少值`);
         if (arg === '--target') { if (explicit) throw new Error('重复 --target'); explicit = value; }
-        else {const key={'--java':'java','--launcher':'launcher','--game-dir':'gameDir','--version-dir':'versionDir','--file':'file','--source':'source','--operation':'operation','--project':'project','--candidate':'candidate','--accept-hash':'acceptHash','--run':'run','--repo':'repo','--release':'release','--sha256':'sha256'}[arg];if(options[key])throw new Error(`重复 ${arg}`);options[key]=value;}
+        else {const key={'--java':'java','--launcher':'launcher','--game-dir':'gameDir','--version-dir':'versionDir','--file':'file','--source':'source','--operation':'operation','--project':'project','--candidate':'candidate','--accept-hash':'acceptHash','--run':'run','--repo':'repo','--release':'release','--sha256':'sha256','--selection':'selection'}[arg];if(options[key])throw new Error(`重复 ${arg}`);options[key]=value;}
       } else if (arg === '--all' && command === 'check') all = true;
       else if (['--dry-run','--confirm-game-dir','--stopped','--adopt-existing','--json','--light','--confirm','--delete'].includes(arg)) options[{'--dry-run':'dryRun','--confirm-game-dir':'confirmGameDir','--stopped':'stopped','--adopt-existing':'adoptExisting','--json':'json','--light':'light','--confirm':'confirm','--delete':'delete'}[arg]]=true;
       else if (arg.startsWith('-')) throw new Error(`未知参数 ${arg}`);
@@ -90,7 +91,7 @@ try {
     }
     if (all && explicit) throw new Error('--all 与 --target 不能同时使用');
     if (!['bootstrap','doctor','targets','use','list','add','remove','update','check','build','pakku','prepare','bind','runtimes','unbind','deploy','recover','changes','collect','import-deps','deps-review','deps-accept','restore-deps','dev','status','apply'].includes(command)) throw new Error(`未知命令 ${command}，运行 mp help`);
-    const allowed = {launcher:['bind'],gameDir:['bind'],versionDir:['bind'],dryRun:['bind','deploy','dev','apply'],confirmGameDir:['bind'],stopped:['deploy','recover','dev','collect','restore-deps','apply'],adoptExisting:['deploy','dev','apply'],json:['changes','collect','status','import-deps'],light:['status'],confirm:['collect','import-deps','deps-accept','restore-deps','apply'],delete:['collect'],file:['collect','restore-deps','apply','import-deps'],source:['collect'],operation:['deps-review'],project:['deps-review'],candidate:['deps-accept','import-deps'],acceptHash:['deps-accept','import-deps'],run:['apply'],repo:['apply'],release:['apply'],sha256:['apply','import-deps']};
+    const allowed = {launcher:['bind'],gameDir:['bind'],versionDir:['bind'],dryRun:['bind','deploy','dev','apply'],confirmGameDir:['bind'],stopped:['deploy','recover','dev','collect','restore-deps','apply'],adoptExisting:['deploy','dev','apply'],json:['changes','collect','status','import-deps'],light:['status'],confirm:['collect','import-deps','deps-accept','restore-deps','apply'],delete:['collect'],file:['collect','restore-deps','apply','import-deps'],source:['collect'],operation:['deps-review'],project:['deps-review'],candidate:['deps-accept','import-deps'],acceptHash:['deps-accept','import-deps'],run:['apply'],repo:['apply'],release:['apply'],sha256:['apply','import-deps'],selection:['import-deps']};
     for (const key of Object.keys(options)) if (allowed[key] && !allowed[key].includes(command)) throw new Error(`${command} 不支持 ${key}`);
     const expected = ['use','add','remove','bind','unbind','deploy','recover','changes','collect','import-deps','deps-review','deps-accept','restore-deps','dev','apply'].includes(command) ? 1 : 0;
     if (positional.length !== expected && !(command === 'update' && positional.length <= 1)) throw new Error(`${command} 参数数量错误`);
@@ -104,6 +105,7 @@ try {
       const target=await selectTarget(root,w,runtime.targetId),jsonReport=options.report;
       options.report=value=>{if(!options.json)console.log(value.managed?formatChanges(value):JSON.stringify(value,null,2));};
       const result=command==='import-deps'?await importDependencies(root,runtime,target,options):command==='changes'?await changes(root,runtime,target):command==='collect'?await collect(root,runtime,target,options):command==='deps-review'?await reviewDependencies(root,runtime,target,options):command==='deps-accept'?await acceptDependencies(root,target,options):await restoreDependencies(root,runtime,target,options);
+      if(result.blocked)process.exitCode=1;
       if(options.json)jsonReport(result.report??result);
       else if(command==='changes')console.log(formatChanges(result));
       else if(!result.preview)jsonReport(result);
