@@ -131,7 +131,7 @@ test('直接模式不会偷偷补 Deploy Collect Apply 的确认参数',options,
 });
 test('Target 复用 use，切换目标后不会部署到旧 Runtime',options,async t=>{
   const f=await fixture(t);
-  const result=await f.execute([], '1\n4\n2\n\n1\nn\nn\n\n0\n0\n');
+  const result=await f.execute([], '2\n1\n2\n\n3\nn\nn\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=await f.commands();assert.ok(calls.some(a=>a[0]==='use'&&a[1]==='b'),result.stdout+'\n'+JSON.stringify(calls));
   const preview=calls.find(a=>a[0]==='dev');assert.deepEqual(preview,['dev','dev-b','--target','b','--dry-run']);
@@ -139,7 +139,7 @@ test('Target 复用 use，切换目标后不会部署到旧 Runtime',options,asy
 });
 test('多 Runtime 需明确选择并在会话内保留，真实部署需独立停止确认',options,async t=>{
   const f=await fixture(t,{targets:['a'],bindings:[{id:'one',targetId:'a'},{id:'two',targetId:'a'}]});
-  const result=await f.execute([], '1\n3\n2\n\n1\nn\ny\n\n0\n0\n');
+  const result=await f.execute([], '2\n2\n2\n\n3\nn\ny\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=await f.commands();assert.ok(calls.some(a=>a[0]==='dev'&&a[1]==='two'&&a.includes('--stopped')));
   assert.ok(!calls.some(a=>a[0]==='dev'&&a[1]==='one'));
@@ -173,16 +173,16 @@ test('Apply 必须先预览，拒绝则不写；确认时转发预览哈希和�
 });
 test('绑定先预览再确认，解绑明确确认；未选择不写',options,async t=>{
   const f=await fixture(t,{bindings:[]});
-  const result=await f.execute([], '3\n3\nnew-dev\nD:\\游戏 测试\\Example\n\ny\n\n0\n0\n');
+  const result=await f.execute([], '2\n6\n2\nnew-dev\nD:\\游戏 测试\\Example\n\ny\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=(await f.commands()).filter(a=>a[0]==='bind');assert.equal(calls.length,2);
   assert.ok(calls[0].includes('--dry-run'));assert.ok(calls[1].includes('--confirm-game-dir'));
   assert.ok(calls[0].includes('D:\\游戏 测试\\Example'),JSON.stringify(calls));
-  const cancelled=await fixture(t);await cancelled.execute([], '3\n5\n1\nn\n\n0\n0\n');
+  const cancelled=await fixture(t);await cancelled.execute([], '2\n8\n1\nn\n\n0\n0\n');
   assert.ok(!(await cancelled.commands()).some(a=>a[0]==='unbind'));
 });
 test('候选接受使用审查哈希；恢复和批量更新可取消',options,async t=>{
-  const f=await fixture(t);const result=await f.execute([], '2\n6\nadd\nsodium\ny\ny\n\n7\n\nn\n\n4\nn\n\n0\n0\n');
+  const f=await fixture(t);const result=await f.execute([], '3\n6\nadd\nsodium\ny\ny\n\n7\n\nn\n\n4\nn\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=await f.commands();assert.ok(calls.some(a=>a[0]==='deps-accept'&&a.includes('c'.repeat(64))&&a.includes('--confirm')));
   assert.ok(!calls.some(a=>a[0]==='update'||a[0]==='restore-deps'&&a.includes('--confirm')));
@@ -197,7 +197,7 @@ test('构建所有目标顺序调用已有 build，失败可返回菜单，提�
 
 
 test('叶子成功、失败、无结果和取消均暂停；纯导航和直接模式不暂停',options,async t=>{
-  for(const [input,override] of [['7\n3\n\n0\n0\n',{}],['7\n3\n\n0\n0\n',{fail:'doctor'}],['5\n3\n\n0\n0\n',{}],['2\n1\n0\n\n0\n0\n',{}],['9\n0\n\n0\n',{}]]) {
+  for(const [input,override] of [['7\n3\n\n0\n0\n',{}],['7\n3\n\n0\n0\n',{fail:'doctor'}],['5\n3\n\n0\n0\n',{}],['3\n1\n0\n\n0\n0\n',{}],['9\n0\n\n0\n',{}]]) {
     const f=await fixture(t,override),result=await f.execute([],input);
     assert.equal(result.code,0,result.stdout+result.stderr);
     assert.equal((result.stdout.match(/按 Enter 继续/g)||[]).length,1,result.stdout);
@@ -212,14 +212,14 @@ test('叶子成功、失败、无结果和取消均暂停；纯导航和直接�
 
 test('Runtime ID 在输入时校验，非法名称不调用 bind',options,async t=>{
   const f=await fixture(t,{bindings:[]});
-  const result=await f.execute([],'3\n3\nfabric-1.21.1-debug\nUPPER\nbad name\n0\n\n0\n0\n');
+  const result=await f.execute([],'2\n6\n2\nfabric-1.21.1-debug\nUPPER\nbad name\n0\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);assert.match(result.stdout,/不能含句点/);assert.match(result.stdout,/pcl2-debug、hmcl-dev/);
   assert.ok(!(await f.commands()).some(a=>a[0]==='bind'));
 });
 
 test('导入点选 JAR 并确认候选哈希，取消不写正式源',options,async t=>{
   for(const answer of ['y','n']) {
-    const f=await fixture(t),result=await f.execute([],`2\n8\nspace\nenter\n${answer}\n\n0\n0\n`);
+    const f=await fixture(t),result=await f.execute([],`3\n8\nspace\nenter\n${answer}\n\n0\n0\n`);
     assert.equal(result.code,0,result.stdout+result.stderr);
     const calls=(await f.commands()).filter(a=>a[0]==='import-deps');assert.equal(calls.length,answer==='y'?3:2);
     assert.ok(calls[1].includes('--selection'));assert.ok(!calls[1].includes('--confirm'));
@@ -260,7 +260,7 @@ test('多选移动边界、切换、全选清空、空选和取消不会误写',
     ['a\nn\nenter\n',[]],['a\nesc\n',[]],
   ]) {
     const f=await fixture(t,{importItems:entries});
-    const result=await f.execute([],`2\n8\n${keys}${expected.length?'y\n':''}\n0\n0\n`);
+    const result=await f.execute([],`3\n8\n${keys}${expected.length?'y\n':''}\n0\n0\n`);
     assert.equal(result.code,0,result.stdout+result.stderr);
     const selections=(await f.calls()).filter(a=>a[0]==='batch-selection');
     assert.deepEqual(selections.flatMap(a=>a[1].map(f=>f.path)),expected);
@@ -287,7 +287,7 @@ test('Collect 多选逐项确认；摘要隐藏 diff，d 保留整个操作详�
 test('Import 四个 JAR 批量识别后只确认一次，单一候选只接受一次',options,async t=>{
   const entries=Array.from({length:4},(_,i)=>({path:`mods/${i}.jar`,hash:'a'.repeat(64)}));
   const f=await fixture(t,{importItems:entries});
-  const result=await f.execute([],'2\n8\na\nenter\ny\n\n0\n0\n');
+  const result=await f.execute([],'3\n8\na\nenter\ny\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=(await f.commands()).filter(a=>a[0]==='import-deps');assert.equal(calls.length,3);
   assert.ok(calls[1].includes('--selection')&&calls[2].includes('--candidate'));
@@ -299,7 +299,7 @@ test('Import 四个 JAR 批量识别后只确认一次，单一候选只接受�
 });
 
 test('Import 批量确认前 d 查看统一候选，取消后不写入',options,async t=>{
-  const f=await fixture(t),result=await f.execute([],'2\n8\na\nenter\nd\nn\n\n0\n0\n');
+  const f=await fixture(t),result=await f.execute([],'3\n8\na\nenter\nd\nn\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout);assert.match(result.stdout,/recognized mod/);
   assert.equal((await f.commands()).filter(a=>a[0]==='import-deps').length,2);
   assert.match(result.stdout,/正式源未修改/);
@@ -369,7 +369,7 @@ test('Git 选择文件后调用既有 cz-git 脚本',gitOptions,async t=>{
 
 test('批量识别失败不确认、不接受、不部分写入',options,async t=>{
   const f=await fixture(t,{failFile:'mods/b.jar',importItems:['a','b','c'].map(n=>({path:`mods/${n}.jar`,hash:'a'.repeat(64)}))});
-  const result=await f.execute([],'2\n8\na\nenter\n\nd\n\n0\n0\n');
+  const result=await f.execute([],'3\n8\na\nenter\n\nd\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=(await f.commands()).filter(a=>a[0]==='import-deps');assert.equal(calls.length,2);
   assert.ok(!calls.some(a=>a.includes('--candidate')));
@@ -382,7 +382,7 @@ test('Collect 排除二进制与冲突，空的 Import 无选择和写入',optio
   const result=await f.execute([],'4\n3\n\n0\n0\n');
   assert.equal(result.code,0,result.stdout);assert.match(result.stdout,/没有可选文件/);
   assert.ok(!(await f.commands()).some(a=>a.includes('--confirm')));
-  const empty=await fixture(t,{importItems:[]}),other=await empty.execute([],'2\n8\n\n0\n0\n');
+  const empty=await fixture(t,{importItems:[]}),other=await empty.execute([],'3\n8\n\n0\n0\n');
   assert.equal(other.code,0,other.stdout);assert.match(other.stdout,/没有需要识别/);
   assert.equal((await empty.commands()).filter(a=>a[0]==='import-deps').length,1);
 });
@@ -419,9 +419,9 @@ test('进度后的错误原因和退出码可见，操作失败仍暂停',option
 });
 test('纯文本与 Nerd Font 菜单保持同一层级，预览不能写入',options,async t=>{
   for(const mode of ['plain','nerd']) {
-    const f=await fixture(t),result=await f.execute([],'1\n2\nn\n\n0\n2\n0\n3\n0\n4\n0\n5\n0\n6\n0\n7\n0\n8\n0\n0\n',{MP_ICONS:mode});
+    const f=await fixture(t),result=await f.execute([],'2\n4\nn\n\n0\n2\n0\n3\n0\n4\n0\n5\n0\n6\n0\n7\n0\n8\n0\n0\n',{MP_ICONS:mode});
     assert.equal(result.code,0,result.stdout+result.stderr);
-    for(const label of ['开发环境','同步到测试实例','预览同步变化','切换测试实例','切换目标','配置与变化'])assert.ok(result.stdout.includes(label),label);
+    for(const label of ['开发环境','同步到测试实例','预览同步变化','切换测试实例','切换整合包目标','配置与变化'])assert.ok(result.stdout.includes(label),label);
     if(mode==='plain')assert.doesNotMatch(result.stdout,/[\uE000-\uF8FF\u{1F000}-\u{1FAFF}]/u);
     else assert.match(result.stdout,/[\uE000-\uF8FF]/u);
     const calls=await f.commands();assert.ok(calls.some(a=>a[0]==='prepare'));
@@ -449,7 +449,7 @@ test('显示设置预览三种模式，保存后即时刷新并跨会话记忆',
   assert.ok((await f.commands()).every(a=>a[0]==='status'));
 });
 test('显示设置取消不创建配置、不暂停、不额外查询状态且返回原页面',options,async t=>{
-  const f=await fixture(t),result=await f.execute([],'2\ns\ninvalid\n0\n0\n0\n');
+  const f=await fixture(t),result=await f.execute([],'3\ns\ninvalid\n0\n0\n0\n');
   assert.equal(result.code,0,result.stdout+result.stderr);
   assert.doesNotMatch(result.stdout,/按 Enter 继续/);assert.match(result.stdout,/请输入 0–3/);
   assert.ok(result.stdout.lastIndexOf('添加 Mod')>result.stdout.indexOf('选择显示模式'));
@@ -486,8 +486,8 @@ test('显示配置保存失败不切换、不留下临时文件，并保留上�
 
 
 test('创建工程入口与实例管理独立，空白工程预览后确认一次，无 Runtime 要求',options,async t=>{
-  const f=await fixture(t,{bindings:[]}),result=await f.execute([],'10\n1\nNew Pack\nnew-pack\n1.21.1\n1\n0.16.14\n1\ny\n\n0\n0\n');
-  assert.equal(result.code,0,result.stdout+result.stderr);assert.match(result.stdout,/创建整合包工程/);assert.match(result.stdout,/启动器 \/ 实例管理/);
+  const f=await fixture(t,{bindings:[]}),result=await f.execute([],'1\n1\nNew Pack\nnew-pack\n1.21.1\n1\n0.16.14\n1\ny\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);assert.match(result.stdout,/创建整合包工程/);assert.match(result.stdout,/开发环境与实例/);
   const calls=(await f.commands()).filter(a=>a[0]!=='status');assert.equal(calls.length,2);
   assert.deepEqual(calls[0],['create-target','new-pack','--name','New Pack','--mc','1.21.1','--loader','fabric','--loader-version','0.16.14','--platform','modrinth']);
   assert.deepEqual(calls[1],[...calls[0],'--accept-hash','e'.repeat(64),'--confirm']);
@@ -495,7 +495,7 @@ test('创建工程入口与实例管理独立，空白工程预览后确认一�
 });
 test('MRPACK 创建先检查、再展示候选并统一确认；取消及无法转换不注册',options,async t=>{
   for(const answer of ['y','n']) {
-    const f=await fixture(t,{bindings:[]}),result=await f.execute([],`10\n2\n中文 包.mrpack\nNew\nnew\n1\n${answer}\n\n0\n0\n`);
+    const f=await fixture(t,{bindings:[]}),result=await f.execute([],`1\n2\n中文 包.mrpack\nNew\nnew\n1\n${answer}\n\n0\n0\n`);
     assert.equal(result.code,0,result.stdout+result.stderr);
     const calls=(await f.commands()).filter(a=>a[0]!=='status');assert.equal(calls.length,answer==='y'?3:2);
     assert.deepEqual(calls[0],['inspect-pack','--file','中文 包.mrpack']);
@@ -503,7 +503,23 @@ test('MRPACK 创建先检查、再展示候选并统一确认；取消及无法�
     if(answer==='y')assert.deepEqual(calls[2],['create-target','new','--candidate','pack-candidate','--accept-hash','e'.repeat(64),'--confirm']);
     assert.ok(!calls.some(a=>['bind','apply','deploy'].includes(a[0])));
   }
-  const f=await fixture(t,{badPack:true});const result=await f.execute([],'10\n2\nbad.mrpack\n\n0\n0\n');
+  const f=await fixture(t,{badPack:true});const result=await f.execute([],'1\n2\nbad.mrpack\n\n0\n0\n');
   assert.match(result.stdout,/无法转换/);assert.ok(!(await f.commands()).some(a=>a[0]==='create-target'));
-  const cancel=await fixture(t);const nav=await cancel.execute([],'10\n0\n0\n');assert.doesNotMatch(nav.stdout,/按 Enter 继续/);
+  const cancel=await fixture(t);const nav=await cancel.execute([],'1\n0\n0\n');assert.doesNotMatch(nav.stdout,/按 Enter 继续/);
+});
+
+test('九项主菜单与环境分组保持清晰，恢复、实例列表和 PCL2 绑定正确路由',options,async t=>{
+  const f=await fixture(t),home=await f.execute([],'0\n');
+  const labels=['创建整合包工程','开发环境与实例','Mod 管理','配置与变化','构建整合包','应用 CI / Release 构建','项目与环境检查','Git 提交','Pakku 高级操作'];
+  for(const [i,label] of labels.entries())assert.ok(home.stdout.includes(`[${i+1}]  ${label}`),home.stdout);
+  assert.doesNotMatch(home.stdout,/\[10\]/);
+  const result=await f.execute([],'2\n5\nn\n\n5\ny\n\n7\n\n6\n1\npcl2-dev\nD:\\fixture\\game\n\nn\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  for(const group of ['当前环境','同步与恢复','实例管理'])assert.ok(result.stdout.includes(group));
+  const calls=await f.commands();
+  assert.deepEqual(calls.filter(a=>a[0]==='recover'),[['recover','dev-a','--target','a','--stopped']]);
+  assert.equal(calls.filter(a=>a[0]==='runtimes').length,1);
+  const binds=calls.filter(a=>a[0]==='bind');assert.equal(binds.length,1);
+  assert.ok(binds[0].includes('pcl2')&&binds[0].includes('--dry-run'));
+  assert.ok(!binds[0].includes('--confirm-game-dir'));
 });

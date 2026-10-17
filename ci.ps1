@@ -484,15 +484,26 @@ function Runtime-Arguments([string] $Command) {
 }
 function Confirm-Stopped { return Confirm-Action '确认游戏已关闭，操作结束前不会启动，并执行上述写入？' }
 function Invoke-Development([string] $Choice) {
-    if ($Choice -eq '3') { Select-Runtime; return }
-    if ($Choice -eq '4') { Select-Target; return }
+    if ($Choice -eq '2') { Select-Runtime; return }
+    if ($Choice -eq '1') { Select-Target; return }
+    if ($Choice -eq '6') {
+        Write-Host '  [1] PCL2'
+        Write-Host '  [2] HMCL'
+        Write-Host '  [0] 返回'
+        $launcher=Read-Choice '选择启动器'
+        if ($launcher -eq '0') { return }
+        if ($launcher -notin @('1','2')) { throw '请选择 PCL2 或 HMCL。' }
+        Invoke-Runtimes $(if ($launcher -eq '1') { '2' } else { '3' }); return
+    }
+    if ($Choice -eq '7') { Invoke-Runtimes '1'; return }
+    if ($Choice -eq '8') { Invoke-Runtimes '5'; return }
     $command=if ($Choice -eq '5') { 'recover' } else { 'dev' }
     $forward=Runtime-Arguments $command
     if ($Choice -eq '5') { if (Confirm-Stopped) { $null=Run-Mp ($forward+@('--stopped')) }; return }
     $null=Run-Mp @('prepare','--target',$script:TargetChoice)
     if (Confirm-Action '是否接管内容完全相同的已有文件？不同内容仍会拒绝') { $forward+= '--adopt-existing' }
     $null=Run-Mp ($forward+@('--dry-run'))
-    if ($Choice -eq '1' -and (Confirm-Stopped)) { $null=Run-Mp ($forward+@('--stopped')) }
+    if ($Choice -eq '3' -and (Confirm-Stopped)) { $null=Run-Mp ($forward+@('--stopped')) }
 }
 function Invoke-Mods([string] $Choice) {
     Require-Target
@@ -553,7 +564,7 @@ function Invoke-Runtimes([string] $Choice) {
         if ($id -and (Confirm-Action "解除 $id 的绑定？游戏文件和备份保留")) { $null=Run-Mp @('unbind',$id); Refresh-Selection }; return
     }
     Require-Target
-    Write-Host "绑定到 Target: $script:TargetChoice（如需切换，先返回开发环境菜单）"
+    Write-Host "绑定到 Target: $script:TargetChoice（如需切换，先在开发环境与实例中切换目标）"
     $name=Read-RuntimeId
     $gameDir=Read-Required '实际游戏目录（绝对路径，不需要额外引号）'
     $versionDir=Read-Choice '版本 JSON 所在目录（相同时留空，0 取消）'
@@ -791,13 +802,12 @@ function Show-Menu {
     $section=''
     $refresh=$true
     while ($true) {
-        $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon dev) 开发环境","$(Get-UiIcon mod) Mod / 依赖管理","$(Get-UiIcon runtime) 启动器 / 实例管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作","$(Get-UiIcon new) 创建整合包工程")
-        $hints=@('输入编号进入功能页。','选择目标与测试实例；预览只生成计划，不写入游戏目录。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。','','创建独立 Pakku Target，不安装游戏或绑定 Runtime。')
+        $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon new) 创建整合包工程","$(Get-UiIcon dev) 开发环境与实例","$(Get-UiIcon mod) Mod 管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作")
+        $hints=@('输入编号进入功能页。','创建独立 Pakku Target，不安装游戏或绑定 Runtime。','选择整合包目标、管理测试实例并同步或恢复文件。','由 Pakku 管理依赖；修改后可检查差异。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。','')
         $menus=@{
-            '10'=@('新建空白工程','从已有 MRPACK 导入')
-            '1'=@("$(Get-UiIcon dev) 同步到测试实例","$(Get-UiIcon preview) 预览同步变化","$(Get-UiIcon runtime) 切换测试实例","$(Get-UiIcon target) 切换目标","$(Get-UiIcon recover) 恢复失败部署（Recover）")
-            '2'=@("$(Get-UiIcon add) 添加 Mod","$(Get-UiIcon remove) 删除 Mod","$(Get-UiIcon refresh) 更新指定 Mod","$(Get-UiIcon refresh) 更新全部 Mod","$(Get-UiIcon list) 查看 Mod 列表","$(Get-UiIcon search) 审查依赖增删","$(Get-UiIcon back) 恢复正式依赖","$(Get-UiIcon import) 从实例导入新增依赖")
-            '3'=@("$(Get-UiIcon list) 查看已绑定实例","$(Get-UiIcon bind) 绑定 PCL2 实例","$(Get-UiIcon bind) 绑定 HMCL 实例","$(Get-UiIcon runtime) 切换当前实例","$(Get-UiIcon unbind) 解除绑定")
+            '1'=@('新建空白工程','从已有 MRPACK 导入')
+            '2'=@("$(Get-UiIcon target) 切换整合包目标（Target）","$(Get-UiIcon runtime) 切换测试实例（Runtime）","$(Get-UiIcon dev) 同步到测试实例","$(Get-UiIcon preview) 预览同步变化","$(Get-UiIcon recover) 恢复未完成的同步","$(Get-UiIcon bind) 绑定启动器实例","$(Get-UiIcon list) 查看实例信息","$(Get-UiIcon unbind) 解除实例绑定")
+            '3'=@("$(Get-UiIcon add) 添加 Mod","$(Get-UiIcon remove) 删除 Mod","$(Get-UiIcon refresh) 更新指定 Mod","$(Get-UiIcon refresh) 更新全部 Mod","$(Get-UiIcon list) 查看 Mod 列表","$(Get-UiIcon search) 审查依赖增删","$(Get-UiIcon back) 恢复正式依赖","$(Get-UiIcon import) 从实例导入新增依赖")
             '4'=@("$(Get-UiIcon list) 查看全部变化","$(Get-UiIcon search) 查看指定文件差异","$(Get-UiIcon import) 选择配置并回收","$(Get-UiIcon new) 审查新增配置","$(Get-UiIcon mod) 检查依赖偏离")
             '5'=@("$(Get-UiIcon build) 构建当前目标","$(Get-UiIcon build) 构建所有目标","$(Get-UiIcon folder) 查看最近构建结果")
             '6'=@("$(Get-UiIcon folder) 应用本地 MRPACK","$(Get-UiIcon settings) 应用 GitHub Actions Run","$(Get-UiIcon tag) 应用 GitHub Release")
@@ -810,9 +820,9 @@ function Show-Menu {
         }
         Show-Page $titles[[int]$section] $hints[[int]$section]
         if (-not $section) {
-            for ($i=1; $i -le 10; $i++) {
+            for ($i=1; $i -le 9; $i++) {
                 if ($i -in @(1,5,7)) {
-                    $group=@{1='开发与同步';5='构建与应用';7='检查与维护'}[$i]
+                    $group=@{1='工程与开发';5='构建与应用';7='检查与维护'}[$i]
                     Write-Host "  ── $group ──" -ForegroundColor DarkGray
                 }
                 Write-Host "  [$i] $($titles[$i])"
@@ -821,7 +831,11 @@ function Show-Menu {
         } else {
             $items=$menus[$section]
             for ($i=0; $i -lt $items.Count; $i++) {
-                if ($section -eq '2' -and $i -eq 5) { Write-Host '  ── 依赖维护 ──' -ForegroundColor DarkGray }
+                if ($section -eq '3' -and $i -eq 5) { Write-Host '  ── 依赖维护 ──' -ForegroundColor DarkGray }
+                if ($section -eq '2' -and $i -in @(0,2,5)) {
+                    $group=@{0='当前环境';2='同步与恢复';5='实例管理'}[$i]
+                    Write-Host "  ── $group ──" -ForegroundColor DarkGray
+                }
                 Write-Host "  [$($i+1)] $($items[$i])"
             }
         }
@@ -846,9 +860,9 @@ function Show-Menu {
             if (-not [int]::TryParse($choice,[ref]$number) -or $number -lt 1 -or $number -gt $menus[$section].Count) { Write-Host '请输入菜单编号。' -ForegroundColor Yellow; continue }
             $refresh=$true
             Invoke-MenuOperation { switch ($section) {
-                '1' { Invoke-Development $choice }; '2' { Invoke-Mods $choice }; '3' { Invoke-Runtimes $choice }
+                '1' { Invoke-CreateProject $choice }; '2' { Invoke-Development $choice }; '3' { Invoke-Mods $choice }
                 '4' { Invoke-Collect $choice }; '5' { Invoke-Builds $choice }; '6' { Invoke-Apply $choice }
-                '7' { Invoke-Checks $choice }; '8' { Invoke-Git $choice }; '10' { Invoke-CreateProject $choice }
+                '7' { Invoke-Checks $choice }; '8' { Invoke-Git $choice }
             } }
         } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
     }
