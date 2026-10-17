@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { filesUnder, readJson, relativePath, safePath } from './workspace.mjs';
 import { pakku, requireSuccess } from './pakku.mjs';
+import { managedPath } from './runtime-fs.mjs';
 
-const forbidden = /(^|\/)(saves|logs|crash-reports|screenshots|assets|libraries|node_modules|versions|\.git|\.local|\.cache|\.work)(\/|$)|(^|\/)(options\.txt|.*credentials.*|.*accounts.*|\.env(?:\..*)?|.*\.(?:jar|zip|mrpack|log|pem|key))$/i;
+const forbidden = /(^|\/)(saves|logs|crash-reports|screenshots|libraries|node_modules|versions|\.git|\.local|\.cache|\.work)(\/|$)|(^|\/)(options\.txt|.*credentials.*|.*accounts.*|\.env(?:\..*)?|.*\.(?:log|pem|key))$/i;
 const runtime = /^(?:build\/|\.pakku\/(shelf|remote|docs|exports)(\/|$))/;
 export async function inspectTarget(root, target) {
   const dir = await safePath(root, target.path);
@@ -25,7 +26,7 @@ export async function inspectTarget(root, target) {
   // A conservative Phase 1 boundary: exact files/directories only. Pakku itself supports richer globs.
   const output = new Map(), mapping = [];
   const claim = (side, destination, origin) => {
-    relativePath(destination);
+    managedPath(destination);
     if (forbidden.test(destination)) throw new Error(`禁止发布路径: ${destination}`);
     for (const scope of side === 'common' ? ['client','server'] : [side]) {
       const key = `${scope}/${destination}`.toLowerCase();
@@ -51,6 +52,8 @@ export async function inspectTarget(root, target) {
     const prefix = `.pakku/${folder}/`;
     for (const f of source.filter(f => f.startsWith(prefix))) claim(side, f.slice(prefix.length), f);
   }
+  const declared=new Set(mapping.map(item=>item.source));
+  for(const file of source)if(!declared.has(file)&&(/\.(jar|zip|mrpack)$/i.test(file)||/(^|\/)assets(\/|$)/i.test(file)))throw new Error('归档/资源必须放入正式 overrides 或由 Pakku overrides 规则明确声明: '+file);
   return { dir, source, config, lock, outputs: [...output.keys()], mapping };
 }
 export async function checkTarget(root, target, options = {}) {

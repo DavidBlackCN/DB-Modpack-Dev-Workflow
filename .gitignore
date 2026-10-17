@@ -29,3 +29,17 @@ node_modules/
 .DS_Store
 Thumbs.db
 .idea/
+
+# Explicit source assets, not downloaded dependencies or build artifacts.
+!/packs/**/.pakku/overrides/**/*.jar
+!/packs/**/.pakku/overrides/**/*.zip
+!/packs/**/.pakku/overrides/**/*.mrpack
+!/packs/**/.pakku/overrides/resourcepacks/*/assets/
+!/packs/**/.pakku/client-overrides/**/*.jar
+!/packs/**/.pakku/client-overrides/**/*.zip
+!/packs/**/.pakku/client-overrides/**/*.mrpack
+!/packs/**/.pakku/client-overrides/resourcepacks/*/assets/
+!/packs/**/.pakku/server-overrides/**/*.jar
+!/packs/**/.pakku/server-overrides/**/*.zip
+!/packs/**/.pakku/server-overrides/**/*.mrpack
+!/packs/**/.pakku/server-overrides/resourcepacks/*/assets/

@@ -105,7 +105,7 @@ pnpm run mp -- create-target imported-pack --candidate <候选ID> --accept-hash 
 - MRPACK v1、Minecraft、单个 Fabric / Forge / NeoForge / Quilt Loader；目前只允许导入为 Modrinth Target，避免跨平台版本匹配改变原文件。
 - 依赖由 Pakku 原生 `import` 按哈希识别；逐项核对 SHA-512、SHA-1，再通过原生 `cfg prj` 设置客户端/服务端侧别并固定版本（`NONE` 更新策略）。不自动补充原包未列出的依赖。下载地址采用 Pakku 识别出的平台地址，不照搬未知来源。
 - 公共、客户端、服务端覆盖文件分别放入 `.pakku/overrides`、`.pakku/client-overrides`、`.pakku/server-overrides`；同名文件保留原来的覆盖优先级。空目录记录会报告为跳过。
-- 转换后实际导出 MRPACK，对照原包的依赖路径、哈希、大小、侧别和覆盖文件内容。无法识别的依赖、内嵌 JAR/ZIP、可选侧别、非标准字段、路径差异或导出漂移会明确报告并阻止整批注册；不会悄悄丢弃内容。先在原包中明确处理这些项目，再重新导入。
+- 转换后实际导出 MRPACK，对照原包的依赖路径、哈希、大小、侧别和覆盖文件内容。无法识别的索引依赖、可选侧别、非标准字段、路径差异或导出漂移会明确报告并阻止整批注册；不会悄悄丢弃内容。先在原包中明确处理这些项目，再重新导入。内嵌 JAR、资源包和光影作为本地 overrides 原样保留，不伪造托管项目；导出时仍核对原始内容哈希。
 - 初始化、转换或注册失败会清理本次新建内容，保留原工作区；并发修改工作区时停止，不覆盖他人的改动。不要在创建期间手动编辑候选或目标目录。
 
 完成后运行 `mp use <Target ID>`，添加依赖或覆盖资源，并执行 check 与 build。完整转换报告和 Pakku 输出可在菜单按 `d` 查看。这里 Pakku 的 `--target` 指发布平台；创建命令的 `--platform` 明确区分该含义，已有 `mp --target` 仍用于选择工作区目标。
@@ -157,3 +157,17 @@ pnpm run mp -- build --target neoforge-1.21.1
 归档读取上限为压缩包 512 MiB、单文件 256 MiB、解压总量 1 GiB、20,000 个条目，不支持 ZIP64、加密包和符号链接。单个依赖下载上限为 512 MiB。超出限制时命令会报错。
 
 下一步见[启动器同步](LAUNCHER_SYNC.md)；CI 与发布配置见[构建与发布](RELEASE.md)。
+
+## 随包分发本地资源
+
+没有托管下载地址的 Mod、自制资源包和光影可以直接放入 Target 的正式覆盖目录：
+
+- `.pakku/overrides/mods/local.jar`：客户端与服务端共用。
+- `.pakku/client-overrides/resourcepacks/local.zip`：仅客户端资源包。
+- `.pakku/client-overrides/shaderpacks/local.zip`：仅客户端光影。
+- `.pakku/server-overrides/mods/local-server.jar`：仅服务端 Mod。
+- 解包资源包也可放在 `.pakku/client-overrides/resourcepacks/<包名>/`，其中的 `assets/` 会保留。
+
+这些目录下的 JAR、ZIP、MRPACK 可正常加入 Git；只保存确实需要分发且拥有分发许可的资源。Pakku 在构建时打包，Workspace 核对内容哈希。客户端、公共和服务端内容继续分别处理，不会无条件合并。资源文件不进入 Pakku 托管依赖列表，不支持自动更新；更新时替换仓库中的文件，再检查、构建和同步。Runtime Import 跳过已由 overrides 管理的 Mod 路径，Collect 仍不自动回收 JAR 或归档。
+
+也可用 Pakku 的 overrides 配置明确声明其他源目录；Git 默认归档例外仅覆盖上述标准目录，自定义位置需自行添加精确的 `.gitignore` 例外。未声明的散落归档、工具缓存和构建产物仍不作为源资源。游戏根目录的 assets、存档、账户、凭据、启动器文件及路径穿越仍受保护。归档大小限制见上文；本地检查和构建通过不代表托管平台已批准发布，上传时仍需符合平台的分发规则。

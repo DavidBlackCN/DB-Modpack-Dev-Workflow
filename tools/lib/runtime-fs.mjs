@@ -27,7 +27,9 @@ export async function absoluteDirectory(input) {
 export function managedPath(name) {
   relativePath(name);
   if (name.split('/').some(p => /[<>"|?*]/.test(p) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p))) throw new Error(`不安全 Windows 路径: ${name}`);
-  if (/(^|\/)(saves|logs|crash-reports|screenshots|assets|libraries|versions|pcl|\.minecraft|\.git|\.local|\.cache|\.work|\.pakku)(\/|$)|(^|\/)(options.*\.txt|.*accounts.*|.*credentials.*|launcher.*|hmcl.*|modpack\.cfg|.*\.json\.lock|.*\.(exe|dll|bat|cmd|ps1|sh)|\.env(?:\..*)?)$/i.test(name)) throw new Error(`禁止纳管私人/启动器/运行文件: ${name}`);
+  // Unpacked resource packs own assets; Minecraft's shared assets directory stays protected.
+  const protectedName=name.replace(/(^|\/)(resourcepacks\/[^/]+)\/assets(?=\/|$)/gi,'$1$2/resource-assets');
+  if (/(^|\/)(saves|logs|crash-reports|screenshots|assets|libraries|versions|pcl|\.minecraft|\.git|\.local|\.cache|\.work|\.pakku)(\/|$)|(^|\/)(options.*\.txt|.*accounts.*|.*credentials.*|launcher.*|hmcl.*|modpack\.cfg|.*\.json\.lock|.*\.(exe|dll|bat|cmd|ps1|sh)|\.env(?:\..*)?)$/i.test(protectedName)) throw new Error(`禁止纳管私人/启动器/运行文件: ${name}`);
   // Version JSON/JAR live at gameDir's root. Config JSON must be in a declared directory.
   if (!name.includes('/') && /\.(json|jar)$/i.test(name)) throw new Error(`禁止纳管根目录版本文件: ${name}`);
   return name;

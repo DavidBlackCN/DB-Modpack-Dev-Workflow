@@ -24,7 +24,7 @@ export async function build(root, target, options = {}) {
   await exportPakku(root,work,options);
   progress('build.verify','正在校验构建产物');
   const files = await filesUnder(work);
-  const found = files.filter(f => /\.(mrpack|zip)$/.test(f));
+  const found = files.filter(f => f.startsWith('build/') && !f.startsWith('build/.cache/') && /\.(mrpack|zip)$/.test(f));
   const artifacts = [];
   for (const kind of target.artifacts) {
     const matches = found.filter(f => f.startsWith(`build/${kind}/`) && f.endsWith(kind === 'modrinth' ? '.mrpack' : '.zip'));
@@ -38,6 +38,11 @@ export async function build(root, target, options = {}) {
       for(const mapping of info.mapping) {
         if(!entries[mapping.archivePath]||sha256(entries[mapping.archivePath])!==snapshot.hashes[mapping.source])throw new Error(`导出遗漏/修改覆盖资源: ${mapping.source}`);
       }
+    }
+    if(kind==='curseforge') {
+      const expected=new Map();
+      for(const side of ['common','client'])for(const mapping of info.mapping.filter(m=>m.side===side))expected.set(mapping.destination,mapping.source);
+      for(const [destination,source] of expected)if(!entries['overrides/'+destination]||sha256(entries['overrides/'+destination])!==snapshot.hashes[source])throw new Error(`CurseForge 导出遗漏/修改覆盖资源: ${source}`);
     }
     if(kind==='serverpack') {
       const expected=new Map();

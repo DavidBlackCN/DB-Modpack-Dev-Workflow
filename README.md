@@ -71,3 +71,5 @@ pnpm run lint:commits
 ## 许可证
 
 本模板自身的内容采用 [CC0 1.0 Universal](LICENSE)。第三方 Mod、工具和素材遵循各自许可证。
+
+本地 Mod、资源包和光影可作为正式 overrides 随包分发，放置方式见[本地资源说明](docs/DEVELOPMENT.md#随包分发本地资源)。

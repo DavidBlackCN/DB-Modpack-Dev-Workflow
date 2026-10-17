@@ -42,14 +42,15 @@ function native(behavior={}) {
         return {path:'mods/'+f.name,hashes:f.hashes,fileSize:f.size,downloads:[f.url],env:{client:side==='SERVER'?'unsupported':'required',server:side==='CLIENT'?'unsupported':'required'}};
       })};
       if(behavior.drift&&manifest.files[0])manifest.files[0].path='mods/changed.jar';
-      const overrides={},server={};
+      const overrides={},server={},client={};
       for(const folder of ['overrides','client-overrides','server-overrides']) {
         const base=path.join(cwd,'.pakku',folder);let names=[];try{names=await filesUnder(base);}catch(e){if(e.code!=='ENOENT')throw e;}
-        for(const name of names){const bytes=await fs.readFile(path.join(base,name));overrides[folder+'/'+name]=bytes;if(folder!=='client-overrides')server[name]=bytes;}
+        for(const name of names){const bytes=await fs.readFile(path.join(base,name));overrides[folder+'/'+name]=bytes;if(folder!=='client-overrides')server[name]=bytes;if(folder!=='server-overrides')client['overrides/'+name]=bytes;}
       }
+      await save(path.join(cwd,'build/.cache/modrinth/client-overrides/resourcepacks/local.zip'),zipSync({}));
       const name=config.name+'-'+config.version;
       if(lock.target!=='curseforge')await save(path.join(cwd,'build/modrinth',name+'.mrpack'),zipSync({'modrinth.index.json':Buffer.from(JSON.stringify(manifest)),...overrides}));
-      if(lock.target!=='modrinth')await save(path.join(cwd,'build/curseforge',name+'.zip'),zipSync({'manifest.json':Buffer.from(JSON.stringify({manifestVersion:1,minecraft:{version:lock.mc_versions[0]},files:[]}))}));
+      if(lock.target!=='modrinth')await save(path.join(cwd,'build/curseforge',name+'.zip'),zipSync({'manifest.json':Buffer.from(JSON.stringify({manifestVersion:1,minecraft:{version:lock.mc_versions[0]},files:[]})),...client}));
       await save(path.join(cwd,'build/serverpack',name+'.zip'),zipSync(server));
     }
     return {code:0,stdout:command==='ls'?'Projects total: 0':command==='export'?"[modrinth profile] exported to 'build'":'ok',stderr:''};
@@ -84,11 +85,11 @@ test('MRPACK 原生依赖、侧别与三种覆盖目录转换，候选确认才�
   const built=await build(f.root,target,{execute:mock.execute});assert.equal(built.artifacts.length,2);
   const server=inspectArchive(built.artifacts.find(a=>a.kind==='serverpack').bytes,'serverpack');assert.equal(Buffer.from(server['config/a.json']).toString(),'common');
 });
-test('无法识别、可选侧别、内嵌 JAR、依赖元数据或导出漂移明确报告且不注册',async t=>{
-  for(const kind of ['unknown','optional','jar','loader','drift']) {
+test('无法识别、可选侧别、依赖元数据或导出漂移明确报告且不注册',async t=>{
+  for(const kind of ['unknown','optional','loader','drift']) {
     const f=await setup(t),manifest=index(),mock=native({wrongLoader:kind==='loader',drift:kind==='drift'});
     manifest.files=[dep(kind==='unknown'?'unknown':'demo',kind==='optional'?{client:'optional',server:'required'}:undefined)];
-    const file=await pack(f,manifest,kind==='jar'?{'overrides/mods/embedded.jar':Buffer.from('unknown')}:{});
+    const file=await pack(f,manifest,{});
     const before=await fs.readFile(path.join(f.root,'workspace.json'));
     const report=await createProject(f.root,'blocked',{name:'Blocked',platform:'modrinth',file,execute:mock.execute});
     assert.equal(report.blocked,true,kind);assert.ok(report.issues.length);assert.equal(report.candidate,undefined);
@@ -138,4 +139,27 @@ test('候选锁文件、原包和工作区变化拒绝接受，取消不注册',
     await assert.rejects(fs.access(path.join(f.root,'packs/new')));
     assert.equal((await loadWorkspace(f.root)).targets.length,1);
   }
+});
+
+test('MRPACK 内嵌本地 Mod、资源包、光影及解包资源按原侧别保留并可构建',async t=>{
+  const f=await setup(t),mock=native();
+  const resources={
+    'overrides/mods/local.jar':zipSync({'fabric.mod.json':Buffer.from('{}')}),
+    'client-overrides/resourcepacks/local.zip':zipSync({'pack.mcmeta':Buffer.from('{}')}),
+    'client-overrides/shaderpacks/local.zip':zipSync({'shaders/a.fsh':Buffer.from('shader')}),
+    'client-overrides/resourcepacks/unpacked/assets/example/textures/a.png':Buffer.from([0,255,1,2]),
+    'server-overrides/mods/server.jar':zipSync({'META-INF/mods.toml':Buffer.from('test')}),
+  };
+  const file=await pack(f,index(),resources),original=await fs.readFile(file);
+  const preview=await createProject(f.root,'local-assets',{name:'Assets',platform:'modrinth',file,execute:mock.execute});
+  assert.equal(preview.blocked,false);assert.equal(preview.overrides.length,5);assert.equal(preview.converted.length,0);
+  await createProject(f.root,'local-assets',{candidate:preview.candidate,acceptHash:preview.acceptHash,confirm:true,execute:mock.execute});
+  const target=(await loadWorkspace(f.root)).targets.at(-1),info=await checkTarget(f.root,target,{execute:mock.execute});
+  assert.equal(info.lock.projects.length,0,'local files must not become invented hosted projects');
+  const built=await build(f.root,target,{execute:mock.execute});assert.deepEqual(built.report.uncollected,[]);
+  const client=inspectArchive(built.artifacts.find(a=>a.kind==='modrinth').bytes,'modrinth');
+  for(const [name,bytes] of Object.entries(resources))assert.deepEqual(Buffer.from(client[name]),Buffer.from(bytes));
+  const server=inspectArchive(built.artifacts.find(a=>a.kind==='serverpack').bytes,'serverpack');
+  assert.ok(server['mods/local.jar']);assert.ok(server['mods/server.jar']);assert.ok(!server['resourcepacks/local.zip']);
+  assert.deepEqual(await fs.readFile(file),original);
 });

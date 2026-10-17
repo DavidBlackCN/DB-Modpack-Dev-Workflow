@@ -54,8 +54,10 @@ export async function scanImportDependencies(root,runtime,target) {
   await verifyRuntime(root,runtime,target);await checkJournal(root,runtime);
   const info=await sourceSnapshot(root,target),known=(info.lock.projects??[]).flatMap(p=>p.files??[]);
   const candidates=[],skipped=[];
+  const localPaths=new Set(info.mapping.filter(m=>m.side!=='server').map(m=>m.destination.toLowerCase()));
   for(const name of await inventory(runtime.gameDir,'mods')) {
     if(!/^mods\/[^/]+\.jar$/i.test(name)) {skipped.push({path:name,reason:'仅识别 mods 根目录中启用的 JAR'});continue;}
+    if(localPaths.has(name.toLowerCase())) {skipped.push({path:name,reason:'项目 overrides 已管理此路径；如有修改，请在 Changes 中检查'});continue;}
     const file=await safePath(runtime.gameDir,name),stat=await fs.lstat(file);
     if(stat.size>256*1024*1024) {skipped.push({path:name,reason:'文件超过 256 MiB'});continue;}
     const current=await fileInfo(runtime.gameDir,name);

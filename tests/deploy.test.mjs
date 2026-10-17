@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import {scanImportDependencies} from '../tools/lib/import-dependencies.mjs';
 import { inspectLauncher } from '../tools/lib/launcher.mjs';
 import { bindRuntime, runtimes, unbindRuntime } from '../tools/lib/runtimes.mjs';
 import { clientManifest, digest, obtainBytes } from '../tools/lib/prepare.mjs';
@@ -267,4 +268,19 @@ test('已从源清单移除的缺失 Mod 不恢复，未知文件仍保留',asyn
   await deploy(f.root,f.runtime,f.target,stopped);
   assert.deepEqual(await fs.readdir(path.join(f.gameDir,'mods')),['unknown.jar']);
   assert.ok(!JSON.parse(await fs.readFile(f.baselineFile,'utf8')).files.some(item=>item.kind==='dependency'));
+});
+
+test('本地 overrides 二进制同步保持哈希，修改冲突与未知文件保护不变',async t=>{
+  const f=await setup(t);
+  const files={'mods/local.jar':Buffer.from([0,255,33]),'resourcepacks/local.zip':Buffer.from([80,75,0]),'shaderpacks/local.zip':Buffer.from([80,75,1]),'resourcepacks/unpacked/assets/demo/a.png':Buffer.from([0,255,3])};
+  for(const [name,bytes] of Object.entries(files))await save(path.join(f.root,f.target.path,'.pakku/client-overrides',name),bytes);
+  await save(path.join(f.gameDir,'mods/unknown.jar'),'untouched');
+  await f.stage();await deploy(f.root,f.runtime,f.target,stopped);
+  for(const [name,bytes] of Object.entries(files))assert.deepEqual(await fs.readFile(path.join(f.gameDir,name)),bytes);
+  assert.equal(await fs.readFile(path.join(f.gameDir,'mods/unknown.jar'),'utf8'),'untouched');
+  let scan=await scanImportDependencies(f.root,f.runtime,f.target);
+  assert.ok(scan.skipped.some(item=>item.path==='mods/local.jar'));assert.ok(!scan.candidates.some(item=>item.path==='mods/local.jar'));
+  await save(path.join(f.gameDir,'mods/local.jar'),'modified');
+  scan=await scanImportDependencies(f.root,f.runtime,f.target);assert.ok(!scan.candidates.some(item=>item.path==='mods/local.jar'));
+  await assert.rejects(deploy(f.root,f.runtime,f.target,stopped),/冲突/);
 });

@@ -59,8 +59,9 @@ test('只读检查检测私密文件、输出冲突和无效 JSON',async t=>{
   await fs.writeFile(path.join(root,target.path,'options.txt'),'private');
   await assert.rejects(inspectTarget(root,target),/私密/);
   await fs.rm(path.join(root,target.path,'options.txt'));
-  await save(`${target.path}/demo.json`,{safe:true});
-  await save(`${target.path}/pakku.json`,{name:'Example',version:'1',overrides:['demo.json'],client_overrides:['demo.json']});
+  await fs.mkdir(path.join(root,target.path,'config'));
+  await save(`${target.path}/config/demo.json`,{safe:true});
+  await save(`${target.path}/pakku.json`,{name:'Example',version:'1',overrides:['config/demo.json'],client_overrides:['config/demo.json']});
   await assert.rejects(inspectTarget(root,target),/冲突/);
   await fs.writeFile(path.join(root,target.path,'pakku.json'),'{');
   await assert.rejects(inspectTarget(root,target),SyntaxError);
@@ -86,4 +87,32 @@ test('ZIP 可读取性、索引与路径穿越检测',()=>{
   assert.throws(()=>inspectArchive(Buffer.from('broken'),'modrinth'));
   assert.throws(()=>inspectArchive(zipSync({'../escape':strToU8('x')}),'serverpack'),/路径/);
   assert.throws(()=>inspectArchive(zipSync({'modrinth.index.json':strToU8('{}')}),'modrinth'));
+});
+
+test('仅明确 overrides 可包含归档资源，私人目录和凭据仍拒绝',async t=>{
+  const {root,target}=await fixture(t),base=path.join(root,target.path);
+  const put=async(name,bytes='resource')=>{const p=path.join(base,name);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,bytes);return p;};
+  for(const name of ['.pakku/overrides/mods/local.jar','.pakku/client-overrides/resourcepacks/local.zip','.pakku/client-overrides/resourcepacks/demo/assets/demo/a.png'])await put(name);
+  assert.equal((await inspectTarget(root,target)).mapping.length,3);
+  for(const name of ['loose.jar','.pakku/overrides/assets/index.json','.pakku/overrides/saves/world/a','.pakku/overrides/config/.env','.pakku/overrides/config/private.key','.pakku/overrides/config/start.ps1']) {
+    const p=await put(name);await assert.rejects(inspectTarget(root,target),undefined,name);await fs.unlink(p);
+  }
+  const secret=await put('.pakku/overrides/config/secret.json','{"accessToken":"secret"}');
+  await assert.rejects(inspectTarget(root,target),/凭据/);await fs.unlink(secret);
+});
+
+test('Git 默认收录三侧正式 overrides 资源，同时忽略工具缓存与构建归档',async t=>{
+  const {root}=await fixture(t);
+  const repo=path.resolve('.');
+  await fs.copyFile(path.join(repo,'.gitignore'),path.join(root,'.gitignore'));
+  requireSuccess(await run('git',['init','-q'],{cwd:root,capture:true}));
+  for(const side of ['overrides','client-overrides','server-overrides']) {
+    for(const file of ['mods/local.jar','resourcepacks/local.zip','shaderpacks/local.zip','resourcepacks/demo/assets/demo/a.png']) {
+      const name=`packs/example/.pakku/${side}/${file}`;
+      const result=await run('git',['check-ignore','--no-index',name],{cwd:root,capture:true});assert.equal(result.code,1,name+' '+result.stdout);
+    }
+  }
+  for(const name of ['.cache/pakku.jar','dist/example/pack.zip','packs/example/build/pack.mrpack','packs/example/.pakku/shelf/cache.jar','packs/example/loose.jar','packs/example/.pakku/overrides/saves/world/a.jar']) {
+    const result=await run('git',['check-ignore','--no-index',name],{cwd:root,capture:true});assert.equal(result.code,0,name);
+  }
 });

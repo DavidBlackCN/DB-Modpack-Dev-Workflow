@@ -48,7 +48,6 @@ export async function inspectPack(file) {
     const destination=`.pakku/${folder}/${relative}`;
     managedPath(relative);
     overrides.push({path:name,destination,hash:sha256(data)});
-    if(/\.(jar|zip|mrpack)$/i.test(relative))issues.push({path:name,reason:'内嵌归档不能可靠转换为 Pakku 依赖，需通过 Pakku 添加并重新导出'});
     if(index.files.some(item=>item.path.toLowerCase()===relative.toLowerCase()))issues.push({path:name,reason:'覆盖文件遮蔽索引依赖，不能无损转换'});
   }
   return {action:'inspect-pack',file:absolute,hash:sha256(bytes),name:index.name,version:index.versionId,mc:index.dependencies.minecraft,loader:normalized[0][0],loaderVersion:normalized[0][1],platforms:['modrinth'],dependencies:index.files.length,overrides,skipped,issues,index,entries};
