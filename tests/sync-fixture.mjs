@@ -1,3 +1,4 @@
+import {writeFixture} from './pakku-fixture.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,7 +18,7 @@ async function setup(t,launcher='pcl2') {
   const root=path.join(base,'project'),mcRoot=path.join(base,'launcher'),gameDir=path.join(mcRoot,'versions','Example');
   await fs.mkdir(root,{recursive:true});
   await fs.cp(path.join(repo,'tests/fixtures',`launcher-${launcher==='pcl2'?'pcl2':'hmcl'}`),mcRoot,{recursive:true});
-  await fs.cp(path.join(repo,'packs/fabric-1.21.1'),path.join(root,'packs/example'),{recursive:true});
+  await writeFixture(path.join(root,'packs/example'));
   const target={id:'example',path:'packs/example',artifacts:['modrinth']};
   await atomicJson(path.join(root,'workspace.json'),{targets:[target]});
   const jar=Buffer.from('fixture-only-not-executable');
