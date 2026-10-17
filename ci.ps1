@@ -11,46 +11,98 @@ $script:RuntimeChoice = $null
 $script:LastResult = $null
 
 # Explicit opt-in: no font detection, installation or terminal configuration.
-$script:NerdFont=$env:MP_ICONS -eq 'nerd'
+$script:IconMode='plain'
+$script:DisplayModes=@('plain','nerd','emoji')
+$script:DisplayLabels=@{plain='纯文本';nerd='Nerd Font';emoji='Emoji'}
 $script:UiIcons=@{
-    ok=@('[成功]',[char]0xf00c)
-    warn=@('[警告]',[char]0xf071)
-    error=@('[错误]',[char]0xf00d)
-    info=@('[提示]',[char]0xf05a)
-    wait=@('[执行]',[char]0xf252)
-    target=@('',[char]0xf140)
-    runtime=@('',[char]0xf11b)
-    launcher=@('',[char]0xf11b)
-    git=@('',[char]0xf126)
-    import=@('',[char]0xf019)
-    build=@('',[char]0xf187)
-    add=@('',[char]0xf067)
-    remove=@('',[char]0xf068)
-    refresh=@('',[char]0xf021)
-    list=@('',[char]0xf03a)
-    search=@('',[char]0xf002)
-    check=@('',[char]0xf002)
-    back=@('',[char]0xf060)
-    recover=@('',[char]0xf1cd)
-    dev=@('',[char]0xf135)
-    preview=@('',[char]0xf06e)
-    bind=@('',[char]0xf0c1)
-    unbind=@('',[char]0xf127)
-    new=@('',[char]0xf067)
-    folder=@('',[char]0xf07c)
-    settings=@('',[char]0xf013)
-    tag=@('',[char]0xf02b)
-    doctor=@('',[char]0xf0f1)
-    edit=@('',[char]0xf044)
-    tools=@('',[char]0xf0ad)
-    home=@('',[char]0xf015)
-    apply=@('',[char]0xf019)
-    file=@('',[char]0xf15b)
-    client=@('',[char]0xf108)
-    mod=@('',[char]0xf12e)
+    ok=@('[成功]',[char]0xf00c,'✅')
+    warn=@('[警告]',[char]0xf071,'⚠️')
+    error=@('[错误]',[char]0xf00d,'❌')
+    info=@('[提示]',[char]0xf05a,'ℹ️')
+    wait=@('[执行]',[char]0xf252,'⏳')
+    target=@('',[char]0xf140,'🎯')
+    runtime=@('',[char]0xf11b,'🎮')
+    launcher=@('',[char]0xf11b,'🕹️')
+    git=@('',[char]0xf126,'🌿')
+    import=@('',[char]0xf019,'📥')
+    build=@('',[char]0xf187,'📦')
+    add=@('',[char]0xf067,'➕')
+    remove=@('',[char]0xf068,'➖')
+    refresh=@('',[char]0xf021,'🔄')
+    list=@('',[char]0xf03a,'📋')
+    search=@('',[char]0xf002,'🔎')
+    check=@('',[char]0xf002,'🔍')
+    back=@('',[char]0xf060,'↩️')
+    recover=@('',[char]0xf1cd,'🛟')
+    dev=@('',[char]0xf135,'🚀')
+    preview=@('',[char]0xf06e,'👀')
+    bind=@('',[char]0xf0c1,'🔗')
+    unbind=@('',[char]0xf127,'🔓')
+    new=@('',[char]0xf067,'🆕')
+    folder=@('',[char]0xf07c,'📂')
+    settings=@('',[char]0xf013,'⚙️')
+    tag=@('',[char]0xf02b,'🏷️')
+    doctor=@('',[char]0xf0f1,'🩺')
+    edit=@('',[char]0xf044,'📝')
+    tools=@('',[char]0xf0ad,'🛠️')
+    home=@('',[char]0xf015,'🏠')
+    apply=@('',[char]0xf019,'📲')
+    file=@('',[char]0xf15b,'📄')
+    client=@('',[char]0xf108,'🖥️')
+    mod=@('',[char]0xf12e,'🧩')
 }
-function Get-UiIcon([string] $Name) {
-    return $script:UiIcons[$Name][[int]$script:NerdFont]
+function Get-UiIcon([string] $Name, [string] $Mode=$script:IconMode) {
+    return $script:UiIcons[$Name][[Array]::IndexOf($script:DisplayModes,$Mode)]
+}
+function Initialize-Display {
+    $file=Join-Path $PSScriptRoot '.local/menu.json'
+    if (Test-Path -LiteralPath $file) {
+        try {
+            $settings=Get-Content -LiteralPath $file -Raw | ConvertFrom-Json -AsHashtable
+            if ($settings.schema -ne 1 -or $settings.icons -cnotin $script:DisplayModes) { throw '无效的显示配置' }
+            $script:IconMode=$settings.icons
+        } catch { Write-Host '[警告] 本机显示配置无法读取，使用纯文本；可在显示设置中重新保存。' -ForegroundColor Yellow }
+    }
+    if ($env:MP_ICONS -cin $script:DisplayModes) { $script:IconMode=$env:MP_ICONS }
+    elseif ($env:MP_ICONS) { Write-Host '[警告] MP_ICONS 无效，使用本机显示设置。' -ForegroundColor Yellow }
+}
+function Save-Display([string] $Mode) {
+    $directory=Join-Path $PSScriptRoot '.local'
+    $file=Join-Path $directory 'menu.json'
+    foreach ($item in @($directory,$file)) {
+        if ((Test-Path -LiteralPath $item) -and ((Get-Item -LiteralPath $item -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw '显示配置路径不能是链接。' }
+    }
+    $null=[IO.Directory]::CreateDirectory($directory)
+    $temp=Join-Path $directory ('menu.'+[guid]::NewGuid().ToString()+'.tmp')
+    try {
+        [IO.File]::WriteAllText($temp,(@{schema=1;icons=$Mode} | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temp,$file,$true)
+    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force } }
+    $script:IconMode=$Mode
+}
+function Show-DisplaySettings {
+    Show-Page '显示设置' '查看图标样例，选择适合当前终端的显示方式。'
+    Write-Host "当前模式: $($script:DisplayLabels[$script:IconMode])"
+    for ($i=0; $i -lt $script:DisplayModes.Count; $i++) {
+        $mode=$script:DisplayModes[$i]
+        Write-Host "  [$($i+1)] $($script:DisplayLabels[$mode])"
+        Write-Host "      $(Get-UiIcon ok $mode) 成功  $(Get-UiIcon warn $mode) 警告  $(Get-UiIcon error $mode) 错误"
+        Write-Host "      $(Get-UiIcon target $mode) 目标  $(Get-UiIcon runtime $mode) 实例  $(Get-UiIcon build $mode) 构建"
+    }
+    Write-Host '图标若显示为方框或错位，请选择纯文本；不会自动安装字体。'
+    Write-Host '  [0] 返回，不修改设置'
+    while ($true) {
+        $choice=Read-Choice '选择显示模式'
+        if ($choice -eq '0') { return }
+        if ($choice -notin @('1','2','3')) { Write-Host '请输入 0–3。' -ForegroundColor Yellow; continue }
+        $mode=$script:DisplayModes[[int]$choice-1]
+        Invoke-MenuOperation -KeepDetails {
+            Save-Display $mode
+            Write-Host "已切换为 $($script:DisplayLabels[$mode])，并保存到 .local/menu.json。"
+            if ($env:MP_ICONS -cin $script:DisplayModes) { Write-Host '下次启动仍优先使用 MP_ICONS；运行 Remove-Item Env:MP_ICONS 后启动即可沿用本机选择。' -ForegroundColor Yellow }
+        }
+        return
+    }
 }
 
 
@@ -692,21 +744,22 @@ function Show-Page([string] $Title, [string] $Description) {
     Write-Host ''
 }
 function Show-Menu {
-    $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon dev) 开发环境","$(Get-UiIcon mod) Mod / 依赖管理","$(Get-UiIcon runtime) 启动器实例管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作")
-    $hints=@('输入编号进入功能页。','选择目标与测试实例；预览只生成计划，不写入游戏目录。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。')
-    $menus=@{
-        '1'=@("$(Get-UiIcon dev) 同步到测试实例","$(Get-UiIcon preview) 预览同步变化","$(Get-UiIcon runtime) 切换测试实例","$(Get-UiIcon target) 切换目标","$(Get-UiIcon recover) 恢复失败部署（Recover）")
-        '2'=@("$(Get-UiIcon add) 添加 Mod","$(Get-UiIcon remove) 删除 Mod","$(Get-UiIcon refresh) 更新指定 Mod","$(Get-UiIcon refresh) 更新全部 Mod","$(Get-UiIcon list) 查看 Mod 列表","$(Get-UiIcon search) 审查依赖增删","$(Get-UiIcon back) 恢复正式依赖","$(Get-UiIcon import) 从实例导入新增依赖")
-        '3'=@("$(Get-UiIcon list) 查看已绑定实例","$(Get-UiIcon bind) 绑定 PCL2 实例","$(Get-UiIcon bind) 绑定 HMCL 实例","$(Get-UiIcon runtime) 切换当前实例","$(Get-UiIcon unbind) 解除绑定")
-        '4'=@("$(Get-UiIcon list) 查看全部变化","$(Get-UiIcon search) 查看指定文件差异","$(Get-UiIcon import) 选择配置并回收","$(Get-UiIcon new) 审查新增配置","$(Get-UiIcon mod) 检查依赖偏离")
-        '5'=@("$(Get-UiIcon build) 构建当前目标","$(Get-UiIcon build) 构建所有目标","$(Get-UiIcon folder) 查看最近构建结果")
-        '6'=@("$(Get-UiIcon folder) 应用本地 MRPACK","$(Get-UiIcon settings) 应用 GitHub Actions Run","$(Get-UiIcon tag) 应用 GitHub Release")
-        '7'=@("$(Get-UiIcon check) 检查当前目标","$(Get-UiIcon check) 检查全部目标","$(Get-UiIcon doctor) 环境诊断","$(Get-UiIcon import) 安装 / 校验 Pakku","$(Get-UiIcon list) 查看工作区状态")
-        '8'=@("$(Get-UiIcon git) 查看 Git 状态","$(Get-UiIcon search) 查看 Git Diff","$(Get-UiIcon edit) 选择文件并提交","$(Get-UiIcon check) 校验提交信息","$(Get-UiIcon import) 选择文件并暂存")
-    }
+    Initialize-Display
     $section=''
     $refresh=$true
     while ($true) {
+        $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon dev) 开发环境","$(Get-UiIcon mod) Mod / 依赖管理","$(Get-UiIcon runtime) 启动器实例管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作")
+        $hints=@('输入编号进入功能页。','选择目标与测试实例；预览只生成计划，不写入游戏目录。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。')
+        $menus=@{
+            '1'=@("$(Get-UiIcon dev) 同步到测试实例","$(Get-UiIcon preview) 预览同步变化","$(Get-UiIcon runtime) 切换测试实例","$(Get-UiIcon target) 切换目标","$(Get-UiIcon recover) 恢复失败部署（Recover）")
+            '2'=@("$(Get-UiIcon add) 添加 Mod","$(Get-UiIcon remove) 删除 Mod","$(Get-UiIcon refresh) 更新指定 Mod","$(Get-UiIcon refresh) 更新全部 Mod","$(Get-UiIcon list) 查看 Mod 列表","$(Get-UiIcon search) 审查依赖增删","$(Get-UiIcon back) 恢复正式依赖","$(Get-UiIcon import) 从实例导入新增依赖")
+            '3'=@("$(Get-UiIcon list) 查看已绑定实例","$(Get-UiIcon bind) 绑定 PCL2 实例","$(Get-UiIcon bind) 绑定 HMCL 实例","$(Get-UiIcon runtime) 切换当前实例","$(Get-UiIcon unbind) 解除绑定")
+            '4'=@("$(Get-UiIcon list) 查看全部变化","$(Get-UiIcon search) 查看指定文件差异","$(Get-UiIcon import) 选择配置并回收","$(Get-UiIcon new) 审查新增配置","$(Get-UiIcon mod) 检查依赖偏离")
+            '5'=@("$(Get-UiIcon build) 构建当前目标","$(Get-UiIcon build) 构建所有目标","$(Get-UiIcon folder) 查看最近构建结果")
+            '6'=@("$(Get-UiIcon folder) 应用本地 MRPACK","$(Get-UiIcon settings) 应用 GitHub Actions Run","$(Get-UiIcon tag) 应用 GitHub Release")
+            '7'=@("$(Get-UiIcon check) 检查当前目标","$(Get-UiIcon check) 检查全部目标","$(Get-UiIcon doctor) 环境诊断","$(Get-UiIcon import) 安装 / 校验 Pakku","$(Get-UiIcon list) 查看工作区状态")
+            '8'=@("$(Get-UiIcon git) 查看 Git 状态","$(Get-UiIcon search) 查看 Git Diff","$(Get-UiIcon edit) 选择文件并提交","$(Get-UiIcon check) 校验提交信息","$(Get-UiIcon import) 选择文件并暂存")
+        }
         if ($refresh) {
             try { Refresh-Selection } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
             $refresh=$false
@@ -730,10 +783,12 @@ function Show-Menu {
         }
         Write-Host "`n  [r] $(Get-UiIcon refresh) 刷新目标、实例与 Git 状态" -ForegroundColor DarkGray
         Write-Host "  [d] $(Get-UiIcon file) 查看上次操作的完整输出" -ForegroundColor DarkGray
+        Write-Host "  [s] $(Get-UiIcon settings) 显示设置" -ForegroundColor DarkGray
         $backLabel=if ($section) { '返回上一级' } else { '退出' }
         Write-Host "  [0] $(Get-UiIcon back) $backLabel`n" -ForegroundColor DarkGray
         $choice=Read-Choice '请选择'
         if ($choice -eq '0') { if (-not $section) { return }; $section=''; continue }
+        if ($choice -eq 's') { Show-DisplaySettings; continue }
         if ($choice -eq 'r') { $refresh=$true; continue }
         if ($choice -eq 'd') { Invoke-MenuOperation -KeepDetails { Write-Host ($script:LastResult.Raw ?? '暂无操作输出。') }; continue }
         try {

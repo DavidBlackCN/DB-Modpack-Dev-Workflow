@@ -65,7 +65,7 @@ async function fixture(t,override={}) {
   await fs.writeFile(spec,JSON.stringify({selected:'a',targets:['a','b'],bindings:[{id:'dev-a',targetId:'a',launcher:'hmcl'},{id:'dev-b',targetId:'b'}],...override}));
   const execute=(args=[],input='',extraEnv={},onOutput=()=>{})=>new Promise((resolve,reject)=>{
     const child=spawn(pwsh,['-NoProfile','-NonInteractive','-File',path.join(root,'ci.ps1'),...args],{
-      cwd:os.tmpdir(),env:{...process.env,PATH:bin,MENU_LOG:log,MENU_SPEC:spec,...extraEnv},windowsHide:true,
+      cwd:os.tmpdir(),env:{...process.env,PATH:bin,MP_ICONS:'',MENU_LOG:log,MENU_SPEC:spec,...extraEnv},windowsHide:true,
     });
     let stdout='',stderr='';child.stdout.on('data',d=>{stdout+=d;onOutput(stdout);});child.stderr.on('data',d=>stderr+=d);
     const timeout=setTimeout(()=>{child.kill();reject(new Error(`menu timed out: ${stdout.slice(-1500)} ${stderr}`));},20000);
@@ -425,4 +425,58 @@ test('纯文本与 Nerd Font 菜单保持同一层级，预览不能写入',opti
     assert.ok(calls.some(a=>a[0]==='dev'&&a.includes('--dry-run')));
     assert.ok(!calls.some(a=>a.includes('--stopped')||a.includes('--confirm')));
   }
+});
+
+
+test('显示设置预览三种模式，保存后即时刷新并跨会话记忆',options,async t=>{
+  const f=await fixture(t),file=path.join(f.root,'.local/menu.json');
+  for(const [number,mode,glyph] of [['2','nerd','\uf135'],['3','emoji','🚀'],['1','plain','']]) {
+    const result=await f.execute([],`s\n${number}\n\n1\n0\n0\n`);
+    assert.equal(result.code,0,result.stdout+result.stderr);
+    for(const label of ['纯文本','Nerd Font','Emoji','图标若显示为方框'])assert.ok(result.stdout.includes(label));
+    assert.equal(JSON.parse(await fs.readFile(file,'utf8')).icons,mode);
+    const after=result.stdout.slice(result.stdout.indexOf('已切换为'));
+    if(glyph)assert.ok(after.includes(glyph+' 开发环境'),after);
+    else assert.doesNotMatch(after,/[\uE000-\uF8FF\u{1F000}-\u{1FAFF}]/u);
+    const reopened=await f.execute([],'0\n');
+    if(glyph)assert.ok(reopened.stdout.includes(glyph+' 开发环境'));
+    else assert.doesNotMatch(reopened.stdout,/[\uE000-\uF8FF\u{1F000}-\u{1FAFF}]/u);
+    assert.deepEqual((await fs.readdir(path.dirname(file))).sort(),['menu.json']);
+  }
+  assert.ok((await f.commands()).every(a=>a[0]==='status'));
+});
+test('显示设置取消不创建配置、不暂停、不额外查询状态且返回原页面',options,async t=>{
+  const f=await fixture(t),result=await f.execute([],'2\ns\ninvalid\n0\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  assert.doesNotMatch(result.stdout,/按 Enter 继续/);assert.match(result.stdout,/请输入 0–3/);
+  assert.ok(result.stdout.lastIndexOf('添加 Mod')>result.stdout.indexOf('选择显示模式'));
+  await assert.rejects(fs.access(path.join(f.root,'.local/menu.json')));
+  assert.equal((await f.commands()).length,1);
+});
+test('环境覆盖、本机配置损坏回退及直接模式不读取显示配置',options,async t=>{
+  const f=await fixture(t),dir=path.join(f.root,'.local'),file=path.join(dir,'menu.json');await fs.mkdir(dir);
+  await fs.writeFile(file,JSON.stringify({schema:1,icons:'nerd'}));
+  let result=await f.execute([],'0\n',{MP_ICONS:'plain'});
+  assert.doesNotMatch(result.stdout,/[\uE000-\uF8FF]/u);
+  result=await f.execute([],'s\n3\n\n0\n',{MP_ICONS:'plain'});
+  assert.match(result.stdout,/下次启动仍优先使用 MP_ICONS/);
+  assert.ok(result.stdout.slice(result.stdout.indexOf('已切换为')).includes('🚀 开发环境'));
+  for(const content of ['bad json',JSON.stringify({schema:99,icons:'nerd'}),JSON.stringify({schema:1,icons:'invalid'})]) {
+    await fs.writeFile(file,content);result=await f.execute([],'0\n');
+    assert.match(result.stdout,/本机显示配置无法读取/);assert.doesNotMatch(result.stdout,/[\uE000-\uF8FF]/u);
+    assert.equal(await fs.readFile(file,'utf8'),content);
+  }
+  result=await f.execute(['status']);assert.equal(result.code,0);assert.doesNotMatch(result.stdout,/显示配置无法读取/);
+  result=await f.execute([],'s\n1\n\n0\n',{MP_ICONS:'invalid'});
+  assert.match(result.stdout,/MP_ICONS 无效/);assert.equal(JSON.parse(await fs.readFile(file,'utf8')).icons,'plain');
+});
+test('显示配置保存失败不切换、不留下临时文件，并保留上次操作详情',options,async t=>{
+  const f=await fixture(t),dir=path.join(f.root,'.local');await fs.mkdir(path.join(dir,'menu.json'),{recursive:true});
+  const result=await f.execute([],'5\n1\n\ns\n2\n\nd\n\n0\n0\n');
+  assert.equal(result.code,0,result.stdout+result.stderr);
+  assert.doesNotMatch(result.stdout,/已切换为/);assert.match(result.stdout,/example.mrpack/);
+  const tail=result.stdout.slice(result.stdout.lastIndexOf('DB Modpack Dev Workflow v2'));
+  assert.doesNotMatch(tail,/[\uE000-\uF8FF]/u);
+  assert.deepEqual(await fs.readdir(dir),['menu.json']);
+  assert.match(result.stdout.slice(result.stdout.indexOf('选择显示模式')),/example.mrpack/);
 });
