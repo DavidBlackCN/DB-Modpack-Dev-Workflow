@@ -54,6 +54,23 @@ $script:UiIcons=@{
 function Get-UiIcon([string] $Name, [string] $Mode=$script:IconMode) {
     return $script:UiIcons[$Name][[Array]::IndexOf($script:DisplayModes,$Mode)]
 }
+# Menu accents use terminal palette colors; body text keeps the terminal default.
+$script:MenuColors=@{key='Cyan';icon='Magenta';group='DarkCyan';ok='Green';warn='Yellow';error='Red';info='Cyan';wait='Cyan'}
+function Format-MenuText([string] $Text, [bool] $UseColor=($Host.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR -and $env:TERM -ne 'dumb' -and $PSStyle.OutputRendering -ne 'PlainText')) {
+    if (-not $UseColor) { return $Text }
+    $icons=@($script:UiIcons.Values | ForEach-Object { $_ } | Where-Object { [string]$_ -ne '' } | ForEach-Object { [regex]::Escape([string]$_) } | Sort-Object -Unique)
+    $pattern='(?<key>\[(?:[0-9]+|r|d|s)\])|(?<icon>'+($icons -join '|')+')'
+    return [regex]::Replace($Text,$pattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($match)
+        $role=if ($match.Groups['key'].Success) { 'key' } else { 'icon' }
+        if ($role -eq 'icon') {
+            foreach ($status in @('ok','warn','error','info','wait')) {
+                if ($match.Value -cin @($script:UiIcons[$status] | ForEach-Object { [string]$_ })) { $role=$status; break }
+            }
+        }
+        return $PSStyle.Foreground.FromConsoleColor([ConsoleColor]$script:MenuColors[$role])+$match.Value+"`e[39m"
+    })
+}
+function Write-MenuLine([string] $Text) { Write-Host (Format-MenuText $Text) }
 function Initialize-Display {
     $file=Join-Path $PSScriptRoot '.local/menu.json'
     if (Test-Path -LiteralPath $file) {
@@ -85,12 +102,12 @@ function Show-DisplaySettings {
     Write-Host "当前模式: $($script:DisplayLabels[$script:IconMode])"
     for ($i=0; $i -lt $script:DisplayModes.Count; $i++) {
         $mode=$script:DisplayModes[$i]
-        Write-Host "  [$($i+1)] $($script:DisplayLabels[$mode])"
-        Write-Host "      $(Get-UiIcon ok $mode) 成功  $(Get-UiIcon warn $mode) 警告  $(Get-UiIcon error $mode) 错误"
-        Write-Host "      $(Get-UiIcon target $mode) 目标  $(Get-UiIcon runtime $mode) 实例  $(Get-UiIcon build $mode) 构建"
+        Write-MenuLine "  [$($i+1)] $($script:DisplayLabels[$mode])"
+        Write-MenuLine "      $(Get-UiIcon ok $mode) 成功  $(Get-UiIcon warn $mode) 警告  $(Get-UiIcon error $mode) 错误"
+        Write-MenuLine "      $(Get-UiIcon target $mode) 目标  $(Get-UiIcon runtime $mode) 实例  $(Get-UiIcon build $mode) 构建"
     }
     Write-Host '图标若显示为方框或错位，请选择纯文本；不会自动安装字体。'
-    Write-Host '  [0] 返回，不修改设置'
+    Write-MenuLine '  [0] 返回，不修改设置'
     while ($true) {
         $choice=Read-Choice '选择显示模式'
         if ($choice -eq '0') { return }
@@ -452,8 +469,8 @@ function Choose-Item($Items, [string] $Label) {
     if (-not $Items.Count) { throw "没有可选的 $Label。" }
     while ($true) {
         Show-Page "$(Get-UiIcon list) 选择 $Label"
-        for ($i=0; $i -lt $Items.Count; $i++) { Write-Host "  [$($i+1)] $(Get-UiIcon build) $($Items[$i].id)  $($Items[$i].launcher)" }
-        Write-Host "`n  [0] $(Get-UiIcon back) 返回" -ForegroundColor DarkGray
+        for ($i=0; $i -lt $Items.Count; $i++) { Write-MenuLine "  [$($i+1)] $(Get-UiIcon build) $($Items[$i].id)  $($Items[$i].launcher)" }
+        Write-MenuLine "`n  [0] $(Get-UiIcon back) 返回"
         $choice=Read-Choice "$Label（0 返回）"
         if ($choice -eq '0') { return $null }
         $number=0
@@ -487,9 +504,9 @@ function Invoke-Development([string] $Choice) {
     if ($Choice -eq '2') { Select-Runtime; return }
     if ($Choice -eq '1') { Select-Target; return }
     if ($Choice -eq '6') {
-        Write-Host '  [1] PCL2'
-        Write-Host '  [2] HMCL'
-        Write-Host '  [0] 返回'
+        Write-MenuLine '  [1] PCL2'
+        Write-MenuLine '  [2] HMCL'
+        Write-MenuLine '  [0] 返回'
         $launcher=Read-Choice '选择启动器'
         if ($launcher -eq '0') { return }
         if ($launcher -notin @('1','2')) { throw '请选择 PCL2 或 HMCL。' }
@@ -599,7 +616,7 @@ function Invoke-Collect([string] $Choice) {
             $file=$item.path; $writeArgs=$forward+@('--file',$file)
             Write-Host "$(Get-UiIcon file) $(Format-DisplayPath $file) → $(Format-DisplayPath $item.source) | $($item.state)"
             if ($item.state -eq 'candidate') {
-                Write-Host "  [1] $(Get-UiIcon client) 客户端覆盖`n  [2] $(Get-UiIcon build) 公共覆盖`n  [0] $(Get-UiIcon back) 跳过此文件"
+                Write-MenuLine "  [1] $(Get-UiIcon client) 客户端覆盖`n  [2] $(Get-UiIcon build) 公共覆盖`n  [0] $(Get-UiIcon back) 跳过此文件"
                 $location=Read-Choice '选择新增配置来源'
                 if ($location -eq '0') { continue }
                 $prefix=@{'1'='.pakku/client-overrides/';'2'='.pakku/overrides/'}[$location]
@@ -742,16 +759,16 @@ function Invoke-CreateProject([string] $Choice) {
     $forward+=@($id,'--name',$name)
     if ($Choice -eq '1') {
         $mc=Read-Required 'Minecraft 版本，例如 1.21.1'
-        Write-Host '  [1] Fabric  [2] NeoForge  [3] Forge  [4] Quilt  [0] 取消'
+        Write-MenuLine '  [1] Fabric  [2] NeoForge  [3] Forge  [4] Quilt  [0] 取消'
         $loader=@{'1'='fabric';'2'='neoforge';'3'='forge';'4'='quilt'}[(Read-Required '选择 Loader')]
         if (-not $loader) { throw 'Loader 选择无效。' }
         $loaderVersion=Read-Required 'Loader 版本'
         $forward+=@('--mc',$mc,'--loader',$loader,'--loader-version',$loaderVersion)
-        Write-Host '  [1] Modrinth  [2] CurseForge  [3] Multiplatform  [0] 取消'
+        Write-MenuLine '  [1] Modrinth  [2] CurseForge  [3] Multiplatform  [0] 取消'
         $platform=@{'1'='modrinth';'2'='curseforge';'3'='multiplatform'}[(Read-Required '选择发布平台')]
     } else {
         Write-Host 'MRPACK 转换目前支持 Modrinth；其他平台不能保证原文件版本一致。'
-        Write-Host '  [1] Modrinth  [0] 取消'
+        Write-MenuLine '  [1] Modrinth  [0] 取消'
         if ((Read-Required '选择发布平台') -ne '1') { throw '发布平台选择无效。' }
         $platform='modrinth';$forward+=@('--file',$file)
         Write-Host '正在隔离目录中识别依赖并验证转换结果，可能需要联网；尚不注册 Target。'
@@ -789,11 +806,11 @@ function Show-Page([string] $Title, [string] $Description) {
     Write-Host '────────────────────────────────────────────' -ForegroundColor DarkGray
     $runtimeLabel=if ($script:RuntimeChoice) { $script:RuntimeChoice } elseif (@($script:Bindings | Where-Object targetId -EQ $script:TargetChoice).Count) { '未选择' } else { '未绑定' }
     $gitState=if ($null -eq $script:State.gitDirty) { '未知' } elseif ($script:State.gitDirty) { '有未提交改动' } else { '干净' }
-    Write-Host "  $(Get-UiIcon target) 目标  $($script:TargetChoice ?? '未选择')"
-    Write-Host "  $(Get-UiIcon runtime) 实例  $runtimeLabel"
+    Write-MenuLine "  $(Get-UiIcon target) 目标  $($script:TargetChoice ?? '未选择')"
+    Write-MenuLine "  $(Get-UiIcon runtime) 实例  $runtimeLabel"
     $launcher=($script:Bindings | Where-Object id -EQ $script:RuntimeChoice | Select-Object -First 1).launcher
-    Write-Host "  $(Get-UiIcon launcher) 启动器  $($launcher ?? '未选择')"
-    Write-Host "  $(Get-UiIcon git) Git   $gitState"
+    Write-MenuLine "  $(Get-UiIcon launcher) 启动器  $($launcher ?? '未选择')"
+    Write-MenuLine "  $(Get-UiIcon git) Git   $gitState"
     if ($Description) { Write-Host "`n  $Description" -ForegroundColor DarkGray }
     Write-Host ''
 }
@@ -823,27 +840,27 @@ function Show-Menu {
             for ($i=1; $i -le 9; $i++) {
                 if ($i -in @(1,5,7)) {
                     $group=@{1='工程与开发';5='构建与应用';7='检查与维护'}[$i]
-                    Write-Host "  ── $group ──" -ForegroundColor DarkGray
+                    Write-Host "  ── $group ──" -ForegroundColor $script:MenuColors.group
                 }
-                Write-Host "  [$i] $($titles[$i])"
+                Write-MenuLine "  [$i] $($titles[$i])"
                 if ($i -in @(4,6)) { Write-Host '' }
             }
         } else {
             $items=$menus[$section]
             for ($i=0; $i -lt $items.Count; $i++) {
-                if ($section -eq '3' -and $i -eq 5) { Write-Host '  ── 依赖维护 ──' -ForegroundColor DarkGray }
+                if ($section -eq '3' -and $i -eq 5) { Write-Host '  ── 依赖维护 ──' -ForegroundColor $script:MenuColors.group }
                 if ($section -eq '2' -and $i -in @(0,2,5)) {
                     $group=@{0='当前环境';2='同步与恢复';5='实例管理'}[$i]
-                    Write-Host "  ── $group ──" -ForegroundColor DarkGray
+                    Write-Host "  ── $group ──" -ForegroundColor $script:MenuColors.group
                 }
-                Write-Host "  [$($i+1)] $($items[$i])"
+                Write-MenuLine "  [$($i+1)] $($items[$i])"
             }
         }
-        Write-Host "`n  [r] $(Get-UiIcon refresh) 刷新目标、实例与 Git 状态" -ForegroundColor DarkGray
-        Write-Host "  [d] $(Get-UiIcon file) 查看上次操作的完整输出" -ForegroundColor DarkGray
-        Write-Host "  [s] $(Get-UiIcon settings) 显示设置" -ForegroundColor DarkGray
+        Write-MenuLine "`n  [r] $(Get-UiIcon refresh) 刷新目标、实例与 Git 状态"
+        Write-MenuLine "  [d] $(Get-UiIcon file) 查看上次操作的完整输出"
+        Write-MenuLine "  [s] $(Get-UiIcon settings) 显示设置"
         $backLabel=if ($section) { '返回上一级' } else { '退出' }
-        Write-Host "  [0] $(Get-UiIcon back) $backLabel`n" -ForegroundColor DarkGray
+        Write-MenuLine "  [0] $(Get-UiIcon back) $backLabel`n"
         $choice=Read-Choice '请选择'
         if ($choice -eq '0') { if (-not $section) { return }; $section=''; continue }
         if ($choice -eq 's') { Show-DisplaySettings; continue }

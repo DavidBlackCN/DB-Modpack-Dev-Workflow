@@ -523,3 +523,40 @@ test('九项主菜单与环境分组保持清晰，恢复、实例列表和 PCL2
   assert.ok(binds[0].includes('pcl2')&&binds[0].includes('--dry-run'));
   assert.ok(!binds[0].includes('--confirm-game-dir'));
 });
+
+test('菜单配色区分序号、图标和正文，状态颜色保留语义，禁色不改变文本',options,async t=>{
+  const f=await fixture(t),source=await fs.readFile(path.join(repo,'ci.ps1'),'utf8');
+  // Load only display declarations/helpers; never run the interactive entry point.
+  const prefix=source.slice(0,source.indexOf('function Initialize-Display'));
+  const script=path.join(f.root,'colors.ps1');
+  await fs.writeFile(script,prefix+`
+$PSStyle.OutputRendering='Ansi'
+$result=@()
+foreach ($mode in @('plain','nerd','emoji')) {
+    $script:IconMode=$mode
+    $line="  [1] $(Get-UiIcon build) 构建整合包"
+    $result+=@{plain=$line;colored=(Format-MenuText $line $true);disabled=(Format-MenuText $line $false);automatic=(Format-MenuText $line)}
+}
+$result+=@{status=(Format-MenuText '[成功] [警告] [错误]' $true)}
+ConvertTo-Json -InputObject $result
+`);
+  const r=spawnSync(pwsh,['-NoProfile','-File',script],{encoding:'utf8'});
+  assert.equal(r.status,0,r.stdout+r.stderr);
+  const data=JSON.parse(r.stdout),strip=s=>s.replace(/\x1b\[[0-9;]*m/g,'');
+  for(const item of data.slice(0,3)) {
+    assert.equal(strip(item.colored),item.plain);
+    assert.equal(item.disabled,item.plain);assert.equal(item.automatic,item.plain);
+    assert.match(item.colored,/\x1b\[96m\[1\]\x1b\[39m/);
+    assert.ok(item.colored.endsWith(' 构建整合包'));
+  }
+  for(const item of data.slice(1,3))assert.match(item.colored,/\x1b\[95m.+\x1b\[39m 构建整合包/);
+  assert.match(data[3].status,/\x1b\[92m\[成功\]/);
+  assert.match(data[3].status,/\x1b\[93m\[警告\]/);
+  assert.match(data[3].status,/\x1b\[91m\[错误\]/);
+  for(const env of [{NO_COLOR:'1'},{TERM:'dumb'}]) {
+    const result=await f.execute([],'2\n0\n0\n',{...env,MP_ICONS:'nerd'});
+    assert.equal(result.code,0,result.stdout+result.stderr);
+    assert.doesNotMatch(result.stdout,/\x1b\[/);
+    assert.match(result.stdout,/开发环境与实例/);
+  }
+});
