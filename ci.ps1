@@ -5,9 +5,54 @@ $PSNativeCommandUseErrorActionPreference = $false
 $PSNativeCommandArgumentPassing = 'Standard'
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+if ($env:NO_COLOR -or $env:TERM -eq 'dumb') { $PSStyle.OutputRendering='PlainText' }
 $script:EntryArguments = @($args)
 $script:RuntimeChoice = $null
 $script:LastResult = $null
+
+# Explicit opt-in: no font detection, installation or terminal configuration.
+$script:NerdFont=$env:MP_ICONS -eq 'nerd'
+$script:UiIcons=@{
+    ok=@('[成功]',[char]0xf00c)
+    warn=@('[警告]',[char]0xf071)
+    error=@('[错误]',[char]0xf00d)
+    info=@('[提示]',[char]0xf05a)
+    wait=@('[执行]',[char]0xf252)
+    target=@('',[char]0xf140)
+    runtime=@('',[char]0xf11b)
+    launcher=@('',[char]0xf11b)
+    git=@('',[char]0xf126)
+    import=@('',[char]0xf019)
+    build=@('',[char]0xf187)
+    add=@('',[char]0xf067)
+    remove=@('',[char]0xf068)
+    refresh=@('',[char]0xf021)
+    list=@('',[char]0xf03a)
+    search=@('',[char]0xf002)
+    check=@('',[char]0xf002)
+    back=@('',[char]0xf060)
+    recover=@('',[char]0xf1cd)
+    dev=@('',[char]0xf135)
+    preview=@('',[char]0xf06e)
+    bind=@('',[char]0xf0c1)
+    unbind=@('',[char]0xf127)
+    new=@('',[char]0xf067)
+    folder=@('',[char]0xf07c)
+    settings=@('',[char]0xf013)
+    tag=@('',[char]0xf02b)
+    doctor=@('',[char]0xf0f1)
+    edit=@('',[char]0xf044)
+    tools=@('',[char]0xf0ad)
+    home=@('',[char]0xf015)
+    apply=@('',[char]0xf019)
+    file=@('',[char]0xf15b)
+    client=@('',[char]0xf108)
+    mod=@('',[char]0xf12e)
+}
+function Get-UiIcon([string] $Name) {
+    return $script:UiIcons[$Name][[int]$script:NerdFont]
+}
+
 
 function Show-Help {
     Write-Host @'
@@ -91,8 +136,36 @@ function Invoke-Mp([string[]] $Arguments, [switch] $Capture) {
         & $script:Pnpm.Source @pnpmArguments | Out-Host
         return $LASTEXITCODE
     }
-    $lines = @(& $script:Pnpm.Source @pnpmArguments 2>&1 | ForEach-Object { "$_" })
-    $code = $LASTEXITCODE
+    $previousProgress=$env:MP_PROGRESS
+    $lines=[System.Collections.Generic.List[string]]::new()
+    $raw=[System.Collections.Generic.List[string]]::new()
+    try {
+        $env:MP_PROGRESS='jsonl'
+        & $script:Pnpm.Source @pnpmArguments 2>&1 | ForEach-Object {
+            $line="$_"
+            $event=Read-ProgressEvent $line
+            if ($event) {
+                if ($event.type -eq 'progress') {
+                    $raw.Add($line)
+                    Write-Host "$(Get-UiIcon wait) $($event.message)" -ForegroundColor Cyan
+                } else { $raw.Add($event.text) }
+            } else { $lines.Add($line); $raw.Add($line) }
+        }
+        $code=$LASTEXITCODE
+    } finally { $env:MP_PROGRESS=$previousProgress }
+    return Convert-MpResult $lines.ToArray() $raw.ToArray() $code
+}
+function Read-ProgressEvent([string] $Line) {
+    if (-not $Line.StartsWith('@mp:')) { return $null }
+    try {
+        $event=ConvertFrom-Json -InputObject $Line.Substring(4) -AsHashtable -ErrorAction Stop
+        if ($event.schema -ne 1) { return $null }
+        if ($event.type -eq 'progress' -and $event.stage -is [string] -and $event.message -is [string]) { return $event }
+        if ($event.type -eq 'diagnostic' -and $event.text -is [string]) { return $event }
+    } catch { }
+    return $null
+}
+function Convert-MpResult([string[]] $lines, [string[]] $raw, [int] $code) {
     $records = [System.Collections.Generic.List[object]]::new()
     $messages = [System.Collections.Generic.List[string]]::new()
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -113,7 +186,7 @@ function Invoke-Mp([string[]] $Arguments, [switch] $Capture) {
         }
         if (-not $found) { $messages.Add($lines[$i]) }
     }
-    return @{ Code=$code; Records=$records.ToArray(); Messages=$messages.ToArray(); Raw=($lines -join "`n") }
+    return @{ Code=$code; Records=$records.ToArray(); Messages=$messages.ToArray(); Raw=($raw -join "`n") }
 }
 
 function Read-Choice([string] $Prompt) {
@@ -142,7 +215,7 @@ function Read-SelectionKey {
 }
 function Select-Multiple($Items, [string] $Label) {
     $Items=@($Items)
-    if (-not $Items.Count) { Write-Host 'ℹ️ 没有可选文件。'; return ,@() }
+    if (-not $Items.Count) { Write-Host "$(Get-UiIcon info) 没有可选文件。"; return ,@() }
     $selected=[bool[]]::new($Items.Count); $cursor=0
     while ($true) {
         if (-not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected) { Clear-Host }
@@ -176,12 +249,12 @@ function Invoke-MenuOperation([scriptblock] $Action, [switch] $KeepDetails) {
     $script:OperationWarning=$false
     try {
         & $Action
-        if ($script:OperationWarning) { Write-Host "`n⚠️ 操作结束，请查看上方提示。" -ForegroundColor Yellow }
-        else { Write-Host "`n✅ 操作结束。" -ForegroundColor Green }
+        if ($script:OperationWarning) { Write-Host "`n$(Get-UiIcon warn) 操作结束，请查看上方提示。" -ForegroundColor Yellow }
+        else { Write-Host "`n$(Get-UiIcon ok) 操作结束。" -ForegroundColor Green }
     }
     catch {
-        if ($_.Exception.Message -eq '已取消。') { Write-Host "`nℹ️ 已取消操作。" -ForegroundColor Yellow }
-        else { Save-Details $_.Exception.Message; Write-Host "`n❌ $($_.Exception.Message)" -ForegroundColor Red }
+        if ($_.Exception.Message -eq '已取消。') { Write-Host "`n$(Get-UiIcon info) 已取消操作。" -ForegroundColor Yellow }
+        else { Save-Details $_.Exception.Message; Write-Host "`n$(Get-UiIcon error) $($_.Exception.Message)" -ForegroundColor Red }
     }
     finally { Pause-ForContinue }
 }
@@ -195,7 +268,7 @@ function Read-RuntimeId {
     while ($true) {
         $value=Read-Required '实例名称，例如 pcl2-debug / hmcl-dev / pcl2-fabric-1211'
         if ($value -cmatch '^[a-z0-9][a-z0-9_-]*$') { return $value }
-        Write-Host '⚠️ 实例名称须以小写字母或数字开头，仅允许小写字母、数字、-、_；不能含句点。示例：pcl2-debug、hmcl-dev、pcl2-fabric-1211。' -ForegroundColor Yellow
+        Write-Host "$(Get-UiIcon warn) 实例名称须以小写字母或数字开头，仅允许小写字母、数字、-、_；不能含句点。示例：pcl2-debug、hmcl-dev、pcl2-fabric-1211。" -ForegroundColor Yellow
     }
 }
 function Read-Required([string] $Prompt) {
@@ -209,17 +282,33 @@ function Show-Rows($Rows) {
         Write-Host "  $($row.type)$($row.state) $($row.path) $($row.reason)"
     }
 }
+function Show-FilePlan($Record) {
+    $counts=@{}
+    foreach ($kind in @('add','update','delete')) { $counts[$kind]=@($Record.actions | Where-Object type -EQ $kind).Count }
+    Write-Host "文件变更: $(@($Record.actions).Count) | 新增: $($counts.add) | 修改: $($counts.update) | 删除: $($counts.delete) | 冲突: $(@($Record.conflicts).Count)"
+    if (@($Record.conflicts).Count) { $script:OperationWarning=$true }
+    Write-Host "保留未知文件: $(@($Record.preserved).Count) | 待下载: $(@($Record.downloads).Count)"
+}
 function Show-Summary($Result) {
+    $seen=[System.Collections.Generic.HashSet[string]]::new()
     if ($Result.Code -ne 0) {
         $message=@($Result.Messages | Where-Object { $_ }) | Select-Object -Last 1
         if ($message) { Write-Host (Format-DisplayPath $message) -ForegroundColor Red }
     }
+    if (-not $Result.Records.Count -and $Result.Code -eq 0 -and $Result.Messages.Count) {
+        Write-Host (Format-DisplayPath ($Result.Messages | Where-Object { $_ } | Select-Object -Last 1))
+    }
     foreach ($record in $Result.Records) {
         if ($record -isnot [System.Collections.IDictionary]) { continue }
+        $summaryKey=if ($record.Contains('actions')) {
+            ConvertTo-Json @($record.actions,$record.conflicts,$record.preserved,$record.downloads) -Depth 100 -Compress
+        } else { ConvertTo-Json $record -Depth 100 -Compress }
+        if (-not $seen.Add($summaryKey)) { continue }
         if ($record.output) {
             Write-Host "目标: $($record.target)`n输出: $(Format-DisplayPath $record.output)"
             foreach ($artifact in $record.artifacts) { Write-Host "  $($artifact.kind): $($artifact.name)" }
             Write-Host "报告: $(Format-DisplayPath (Join-Path $record.output 'build-report.json'))"
+            if (@($record.uncollected).Count) { $script:OperationWarning=$true; Write-Host "未收集产物: $($record.uncollected.Count)，按 d 查看。" -ForegroundColor Yellow }
         } elseif ($record.action -eq 'bind') {
             $r = $record.runtime
             Write-Host "实例: $($r.id) / $($r.targetId) / $($r.launcher)"
@@ -229,13 +318,17 @@ function Show-Summary($Result) {
             Write-Host "现有 Mod/配置: $(@($record.existing).Count) 个（不自动接管）"
         } elseif ($record.action -eq 'apply') {
             Write-Host "目标: $($record.target) | 包版本: $($record.version) | 来源: $($record.provenance.kind)"
+        } elseif ($record.action -eq 'recover') {
+            Write-Host "待恢复文件: $(@($record.files).Count)"
         } elseif ($record.action -eq 'import-batch') {
-            Write-Host "📦 成功识别: $(@($record.recognized).Count) | 跳过: $(@($record.skipped).Count) | 失败: $(@($record.failed).Count) | 待导入项目: $($record.pending)"
-            foreach ($item in $record.recognized) { Write-Host "  ✅ $(Format-DisplayPath $item.path) → $($item.project)" }
+            Write-Host "$(Get-UiIcon build) 成功识别: $(@($record.recognized).Count) | 跳过: $(@($record.skipped).Count) | 失败: $(@($record.failed).Count) | 待导入项目: $($record.pending)"
+            foreach ($item in $record.recognized) { Write-Host "  $(Get-UiIcon ok) $(Format-DisplayPath $item.path) → $($item.project)" }
             foreach ($item in $record.skipped) { Write-Host "  ─ $(Format-DisplayPath $item.path)：$($item.reason)" -ForegroundColor DarkGray }
-            foreach ($item in $record.failed) { Write-Host "  ❌ $(Format-DisplayPath $item.path)：$(Format-DisplayPath $item.reason)" -ForegroundColor Red }
-            foreach ($item in $record.added) { Write-Host "  ➕ $($item.name.Values -join ' / ')" }
-            if ($record.blocked) { $script:OperationWarning=$true; Write-Host '⚠️ 本批未导入；排除异常项后重新选择。' -ForegroundColor Yellow }
+            foreach ($item in $record.failed) { Write-Host "  $(Get-UiIcon error) $(Format-DisplayPath $item.path)：$(Format-DisplayPath $item.reason)" -ForegroundColor Red }
+            foreach ($item in @($record.added | Where-Object { $_.pakku_id -notin @($record.recognized.pakkuId) })) {
+                Write-Host "  自动依赖: $($item.name.Values -join ' / ')"
+            }
+            if ($record.blocked) { $script:OperationWarning=$true; Write-Host "$(Get-UiIcon warn) 本批未导入；排除异常项后重新选择。" -ForegroundColor Yellow }
             Write-Host '输入 d 可查看 Pakku 日志、完整哈希及 Lock Diff。' -ForegroundColor DarkGray
         } elseif ($record.action -eq 'import-deps') {
             Write-Host "待识别 JAR: $(@($record.candidates).Count) | 已跳过: $(@($record.skipped).Count)"
@@ -246,14 +339,11 @@ function Show-Summary($Result) {
             }
             if (@($record.conflicts).Count) { $script:OperationWarning=$true }
         } elseif ($record.Contains('actions')) {
-            Write-Host "文件变更: $(@($record.actions).Count) | 冲突: $(@($record.conflicts).Count)"
-            if (@($record.conflicts).Count) { $script:OperationWarning=$true }
-            Write-Host "保留未知文件: $(@($record.preserved).Count) | 待下载: $(@($record.downloads).Count)"
+            Show-FilePlan $record
         } elseif ($record.projectPath) {
             Write-Host "待接受依赖: $($record.operation) $($record.project) | 新增项目: $(@($record.added).Count)"
             foreach ($item in $record.added) {
-                Write-Host "  ➕ $($item.name.Values -join ' / ')（$($item.slug.Values -join ' / ')）"
-                foreach ($file in $item.files) { Write-Host "     文件: $($file.name) | 平台版本 ID: $($file.id)" }
+                Write-Host "  $(Get-UiIcon add) $($item.name.Values -join ' / ')（$($item.slug.Values -join ' / ')）"
             }
             Write-Host '输入 d 可查看完整候选与锁文件差异。' -ForegroundColor DarkGray
         } elseif ($record.Contains('gitDirty')) {
@@ -265,14 +355,15 @@ function Show-Summary($Result) {
         } elseif ($record.directory) {
             Write-Host "目标: $($record.target) | 准备文件: $(@($record.files).Count)"
         } else {
+            $labels=@{check='检查';target='目标';applied='已同步文件';adopted='已接管文件';unchanged='无需变更';recovery='恢复';restored='已恢复';collected='已回收';backup='备份';notice='提示';retained='保留'}
             foreach ($key in @('check','target','applied','adopted','unchanged','recovery','restored','collected','backup','notice','retained','node','pnpm','java','git','pakku')) {
-                if ($record.Contains($key)) { Write-Host "$key : $($record[$key])" }
+                if ($record.Contains($key)) { Write-Host "$($labels[$key] ?? $key) : $(Format-DisplayPath ([string]$record[$key]))" }
             }
         }
     }
 }
 function Run-Mp([string[]] $Arguments) {
-    Write-Host "⏳ 执行: $($Arguments[0])" -ForegroundColor Cyan
+    Write-Host "$(Get-UiIcon wait) $($Arguments[0])" -ForegroundColor Cyan
     $result = Invoke-Mp $Arguments -Capture
     Save-Details $result.Raw
     Show-Summary $result
@@ -300,9 +391,9 @@ function Refresh-Selection {
 function Choose-Item($Items, [string] $Label) {
     if (-not $Items.Count) { throw "没有可选的 $Label。" }
     while ($true) {
-        Show-Page "📋 选择 $Label"
-        for ($i=0; $i -lt $Items.Count; $i++) { Write-Host "  [$($i+1)] 📦 $($Items[$i].id)  $($Items[$i].launcher)" }
-        Write-Host "`n  [0] ↩️ 返回" -ForegroundColor DarkGray
+        Show-Page "$(Get-UiIcon list) 选择 $Label"
+        for ($i=0; $i -lt $Items.Count; $i++) { Write-Host "  [$($i+1)] $(Get-UiIcon build) $($Items[$i].id)  $($Items[$i].launcher)" }
+        Write-Host "`n  [0] $(Get-UiIcon back) 返回" -ForegroundColor DarkGray
         $choice=Read-Choice "$Label（0 返回）"
         if ($choice -eq '0') { return $null }
         $number=0
@@ -312,7 +403,7 @@ function Choose-Item($Items, [string] $Label) {
 }
 function Select-Target {
     $id=Choose-Item $script:Targets 'Target'
-    if ($id) { $null=Run-Mp @('use',$id); Refresh-Selection; Write-Host "🎯 当前目标: $id" }
+    if ($id) { $null=Run-Mp @('use',$id); Refresh-Selection; Write-Host "$(Get-UiIcon target) 当前目标: $id" }
 }
 function Require-Target {
     Refresh-Selection
@@ -323,7 +414,7 @@ function Select-Runtime {
     Require-Target
     $available=@($script:Bindings | Where-Object targetId -EQ $script:TargetChoice)
     $id=Choose-Item $available 'Runtime'
-    if ($id) { $script:RuntimeChoice=$id; Write-Host "🎮 当前实例: $id | 启动器: $(($available | Where-Object id -EQ $id).launcher)" }
+    if ($id) { $script:RuntimeChoice=$id; Write-Host "$(Get-UiIcon runtime) 当前实例: $id | 启动器: $(($available | Where-Object id -EQ $id).launcher)" }
 }
 function Runtime-Arguments([string] $Command) {
     Require-Target
@@ -375,23 +466,23 @@ function Invoke-Mods([string] $Choice) {
         $forward=Runtime-Arguments 'import-deps'
         $result=Run-Mp ($forward+@('--json'))
         $report=$result.Records[-1]
-        if (-not $report.candidates.Count) { Write-Host 'ℹ️ 没有需要识别的新增 JAR。'; return }
-        $items=Select-Multiple $report.candidates '📥 选择要导入的依赖'
-        if (-not $items.Count) { Write-Host 'ℹ️ 未选择依赖，未导入。'; return }
+        if (-not $report.candidates.Count) { Write-Host "$(Get-UiIcon info) 没有需要识别的新增 JAR。"; return }
+        $items=Select-Multiple $report.candidates "$(Get-UiIcon import) 选择要导入的依赖"
+        if (-not $items.Count) { Write-Host "$(Get-UiIcon info) 未选择依赖，未导入。"; return }
         $selection=[IO.Path]::GetTempFileName()
         try {
             $payload=@($items | ForEach-Object { @{path=$_.path;hash=$_.hash} })
             [IO.File]::WriteAllText($selection,(ConvertTo-Json -InputObject $payload -Depth 5),[Text.UTF8Encoding]::new($false))
-            Write-Host "⏳ 正在批量识别 $($items.Count) 个 JAR，并校验统一候选；可能需要联网。" -ForegroundColor Cyan
+            Write-Host "$(Get-UiIcon wait) 正在批量识别 $($items.Count) 个 JAR，并校验统一候选；可能需要联网。" -ForegroundColor Cyan
             $result=Run-Mp ($forward+@('--selection',$selection,'--json'))
         } finally { Remove-Item -LiteralPath $selection -Force -ErrorAction SilentlyContinue }
         $candidate=$result.Records[-1]
-        if ($candidate.blocked) { $script:OperationWarning=$true; Write-Host '⚠️ 本批未导入，请排除异常项后重新选择。'; return }
-        if (-not $candidate.projectPath -or -not $candidate.hash) { Write-Host 'ℹ️ 没有待导入依赖。'; return }
+        if ($candidate.blocked) { $script:OperationWarning=$true; Write-Host "$(Get-UiIcon warn) 本批未导入，请排除异常项后重新选择。"; return }
+        if (-not $candidate.projectPath -or -not $candidate.hash) { Write-Host "$(Get-UiIcon info) 没有待导入依赖。"; return }
         if (Confirm-Action '确认上述全部新增依赖及许可，一次性导入项目？输入 d 查看完整差异') {
             $null=Run-Mp ($forward+@('--candidate',$candidate.id,'--accept-hash',$candidate.hash,'--confirm','--json'))
-            Write-Host "📥 已一次性导入 $($candidate.pending) 个 Project；可用 git diff 检查。"
-        } else { Write-Host 'ℹ️ 已取消导入，正式源未修改。' }
+            Write-Host "$(Get-UiIcon import) 已一次性导入 $($candidate.pending) 个 Project；可用 git diff 检查。"
+        } else { Write-Host "$(Get-UiIcon info) 已取消导入，正式源未修改。" }
     }
 }
 function Invoke-Runtimes([string] $Choice) {
@@ -402,7 +493,7 @@ function Invoke-Runtimes([string] $Choice) {
         if ($id -and (Confirm-Action "解除 $id 的绑定？游戏文件和备份保留")) { $null=Run-Mp @('unbind',$id); Refresh-Selection }; return
     }
     Require-Target
-    Write-Host "绑定到 Target: $script:TargetChoice（如需切换，先返回开发测试菜单）"
+    Write-Host "绑定到 Target: $script:TargetChoice（如需切换，先返回开发环境菜单）"
     $name=Read-RuntimeId
     $gameDir=Read-Required '实际游戏目录（绝对路径，不需要额外引号）'
     $versionDir=Read-Choice '版本 JSON 所在目录（相同时留空，0 取消）'
@@ -430,14 +521,14 @@ function Invoke-Collect([string] $Choice) {
         Write-Host ($item.diff.text ?? $item.diff.description ?? '文件无文本差异。'); return
     }
     Write-Host '仅列出可回收文件；冲突需要先人工合并，二进制文件不自动回收。'
-    $selected=Select-Multiple @($items | Where-Object { $_.state -in @('runtime-only','candidate') -and -not $_.binary -and -not $_.diff.binary }) '📥 选择要回收的配置'
+    $selected=Select-Multiple @($items | Where-Object { $_.state -in @('runtime-only','candidate') -and -not $_.binary -and -not $_.diff.binary }) "$(Get-UiIcon import) 选择要回收的配置"
     $completed=0
     try {
         foreach ($item in $selected) {
             $file=$item.path; $writeArgs=$forward+@('--file',$file)
-            Write-Host "📄 $(Format-DisplayPath $file) → $(Format-DisplayPath $item.source) | $($item.state)"
+            Write-Host "$(Get-UiIcon file) $(Format-DisplayPath $file) → $(Format-DisplayPath $item.source) | $($item.state)"
             if ($item.state -eq 'candidate') {
-                Write-Host "  [1] 🖥️ 客户端覆盖`n  [2] 📦 公共覆盖`n  [0] ↩️ 跳过此文件"
+                Write-Host "  [1] $(Get-UiIcon client) 客户端覆盖`n  [2] $(Get-UiIcon build) 公共覆盖`n  [0] $(Get-UiIcon back) 跳过此文件"
                 $location=Read-Choice '选择新增配置来源'
                 if ($location -eq '0') { continue }
                 $prefix=@{'1'='.pakku/client-overrides/';'2'='.pakku/overrides/'}[$location]
@@ -449,14 +540,14 @@ function Invoke-Collect([string] $Choice) {
             }
             if (Confirm-Stopped) { $null=Run-Mp ($writeArgs+@('--confirm','--stopped')); $completed++ }
         }
-    } finally { Write-Host "📥 回收完成 $completed / $($selected.Count) 项。已完成项保留，可用 git diff 检查。" }
+    } finally { Write-Host "$(Get-UiIcon import) 回收完成 $completed / $($selected.Count) 项。已完成项保留，可用 git diff 检查。" }
 }
 function Invoke-Builds([string] $Choice) {
     if ($Choice -eq '2') { Refresh-Selection } else { Require-Target }
     if ($Choice -eq '3') {
         $directory=Join-Path $PSScriptRoot "dist/$script:TargetChoice"
         $latest=Get-ChildItem -LiteralPath $directory -Filter build-report.json -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if (-not $latest) { $script:OperationWarning=$true; Write-Host '⚠️ 当前目标还没有本地构建结果。' -ForegroundColor Yellow; return }
+        if (-not $latest) { $script:OperationWarning=$true; Write-Host "$(Get-UiIcon warn) 当前目标还没有本地构建结果。" -ForegroundColor Yellow; return }
         $report=Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json -AsHashtable
         $report.output=$latest.DirectoryName; $report.target=$report.targetId
         Save-Details ($report | ConvertTo-Json -Depth 20)
@@ -527,22 +618,22 @@ function Invoke-Git([string] $Choice) {
     if ($Choice -eq '4') {
         $output=@(& $script:Pnpm.Source run lint:commits 2>&1); Save-Details ($output -join "`n")
         if ($LASTEXITCODE -ne 0) { throw '提交信息校验失败，按 d 查看详情。' }
-        Write-Host '✅ 提交信息校验通过。'; return
+        Write-Host "$(Get-UiIcon ok) 提交信息校验通过。"; return
     }
     if ($Choice -eq '2') {
         Save-Details (Read-Git @('--no-pager','diff','--no-ext-diff'))
         Save-Details (Read-Git @('--no-pager','diff','--cached','--no-ext-diff'))
         Write-Host (Read-Git @('diff','--stat')); Write-Host (Read-Git @('diff','--cached','--stat'))
-        Write-Host '📄 完整差异已保留，返回后按 d 查看。'; return
+        Write-Host "$(Get-UiIcon file) 完整差异已保留，返回后按 d 查看。"; return
     }
     $items=Read-GitFiles
     Save-Details ($items | ConvertTo-Json -Depth 5)
     if ($Choice -eq '1') {
-        Write-Host "🌿 变化文件: $($items.Count) | 已暂存: $(@($items | Where-Object staged).Count)"
+        Write-Host "$(Get-UiIcon git) 变化文件: $($items.Count) | 已暂存: $(@($items | Where-Object staged).Count)"
         foreach ($item in $items) { Write-Host "  $($item.state) $(Format-DisplayPath $item.path)" }; return
     }
-    $selected=Select-Multiple $items '🌿 选择需要暂存的文件（包含该文件全部修改）'
-    if (-not $selected.Count) { Write-Host 'ℹ️ 未选择文件，暂存区保持原样。'; return }
+    $selected=Select-Multiple $items "$(Get-UiIcon git) 选择需要暂存的文件（包含该文件全部修改）"
+    if (-not $selected.Count) { Write-Host "$(Get-UiIcon info) 未选择文件，暂存区保持原样。"; return }
     $paths=@($selected | ForEach-Object { $_.paths })
     if ($Choice -eq '3' -and @($items | Where-Object { $_.staged -and $_.path -cnotin $selected.path }).Count) {
         throw '暂存区包含未选中的文件。请一并选择，或先在编辑器中调整暂存区；本次未暂存或提交。'
@@ -557,21 +648,21 @@ function Invoke-Git([string] $Choice) {
             $null=Read-Git @('--literal-pathspecs','add',"--pathspec-from-file=$pathFile",'--pathspec-file-nul')
         }
     } finally { Remove-Item -LiteralPath $pathFile -Force -ErrorAction SilentlyContinue }
-    Write-Host "✅ 已暂存 $($selected.Count) 个文件。"
+    Write-Host "$(Get-UiIcon ok) 已暂存 $($selected.Count) 个文件。"
     Save-Details (Read-Git @('--no-pager','diff','--cached','--no-ext-diff'))
     if ($Choice -eq '3') {
         # Recheck the index before opening cz-git; preserve any unrelated staged work.
         $staged=@((Read-Git @('diff','--cached','--name-only','--no-renames','-z')).Split([char]0) | Where-Object { $_ })
         if (@($staged | Where-Object { $_ -cnotin $paths }).Count) { throw '暂存区出现未选择的文件，已停止提交。请检查 Git 状态。' }
-        if (-not $staged.Count) { Write-Host 'ℹ️ 没有需要提交的变化。'; return }
+        if (-not $staged.Count) { Write-Host "$(Get-UiIcon info) 没有需要提交的变化。"; return }
         & $script:Pnpm.Source run commit
         if ($LASTEXITCODE -ne 0) { throw '提交未完成，已暂存文件保留。' }
     }
 }
 function Invoke-Advanced {
-    Show-Page '🛠️ Pakku 高级操作' '逐个输入原生参数，空行结束；输入 0 取消。'
+    Show-Page "$(Get-UiIcon tools) Pakku 高级操作" '逐个输入原生参数，空行结束；输入 0 取消。'
     Require-Target
-    Write-Host 'Pakku 原生命令可能修改工程。逐个输入参数，不需要 shell 引号；空行结束，0 取消。'
+    Write-Host 'Pakku 原生命令可能修改工程，请核对参数后确认。'
     $native=@()
     while ($true) {
         $value=Read-Choice "参数 $($native.Count+1)"
@@ -592,26 +683,26 @@ function Show-Page([string] $Title, [string] $Description) {
     Write-Host '────────────────────────────────────────────' -ForegroundColor DarkGray
     $runtimeLabel=if ($script:RuntimeChoice) { $script:RuntimeChoice } elseif (@($script:Bindings | Where-Object targetId -EQ $script:TargetChoice).Count) { '未选择' } else { '未绑定' }
     $gitState=if ($null -eq $script:State.gitDirty) { '未知' } elseif ($script:State.gitDirty) { '有未提交改动' } else { '干净' }
-    Write-Host "  🎯 目标  $($script:TargetChoice ?? '未选择')"
-    Write-Host "  🎮 实例  $runtimeLabel"
+    Write-Host "  $(Get-UiIcon target) 目标  $($script:TargetChoice ?? '未选择')"
+    Write-Host "  $(Get-UiIcon runtime) 实例  $runtimeLabel"
     $launcher=($script:Bindings | Where-Object id -EQ $script:RuntimeChoice | Select-Object -First 1).launcher
-    Write-Host "  🕹️ 启动器  $($launcher ?? '未选择')"
-    Write-Host "  🌿 Git   $gitState"
+    Write-Host "  $(Get-UiIcon launcher) 启动器  $($launcher ?? '未选择')"
+    Write-Host "  $(Get-UiIcon git) Git   $gitState"
     if ($Description) { Write-Host "`n  $Description" -ForegroundColor DarkGray }
     Write-Host ''
 }
 function Show-Menu {
-    $titles=@('🏠 主菜单','🚀 开发测试','🧩 Mod / 依赖管理','🎮 启动器实例管理','📥 查看与回收游戏修改','📦 构建整合包','📲 应用 CI / Release 构建','🔍 项目与环境检查','🌿 Git 提交','🛠️ Pakku 高级操作')
-    $hints=@('输入编号进入功能页。','先预览变化，再确认部署；游戏须保持关闭。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。')
+    $titles=@("$(Get-UiIcon home) 主菜单","$(Get-UiIcon dev) 开发环境","$(Get-UiIcon mod) Mod / 依赖管理","$(Get-UiIcon runtime) 启动器实例管理","$(Get-UiIcon import) 配置与变化","$(Get-UiIcon build) 构建整合包","$(Get-UiIcon apply) 应用 CI / Release 构建","$(Get-UiIcon check) 项目与环境检查","$(Get-UiIcon git) Git 提交","$(Get-UiIcon tools) Pakku 高级操作")
+    $hints=@('输入编号进入功能页。','选择目标与测试实例；预览只生成计划，不写入游戏目录。','由 Pakku 管理依赖；修改后可检查差异。','绑定启动器已有实例，按目标选择测试实例。','先查看差异，再逐个回收配置文件。','构建结果保存在 dist/，可查看最近一次输出。','先预览包来源与变化，再确认写入实例。','检查源工程、工具环境和当前状态。','先暂存需要提交的文件，再打开规范提交菜单。')
     $menus=@{
-        '1'=@('🚀 部署到当前实例','👀 准备并预览部署变化','🎮 切换测试实例','🎯 切换目标','🛟 恢复失败部署（Recover）')
-        '2'=@('➕ 添加 Mod','➖ 删除 Mod','🔄 更新指定 Mod','🔄 更新全部 Mod','📋 查看 Mod 列表','🔎 按项目 ID 审查依赖增删','↩️ 恢复实例中的正式依赖','📥 从实例导入新增依赖')
-        '3'=@('📋 查看已绑定实例','🔗 绑定 PCL2 实例','🔗 绑定 HMCL 实例','🎮 切换当前实例','🔓 解除绑定')
-        '4'=@('📋 查看全部变化','🔎 查看指定配置差异','📥 选择配置并回收','🆕 审查新增配置候选','🧩 查看依赖偏离')
-        '5'=@('📦 构建当前目标','📦 构建所有目标','📂 查看最近构建结果')
-        '6'=@('📂 应用本地 MRPACK','⚙️ 应用 GitHub Actions Run','🏷️ 应用 GitHub Release')
-        '7'=@('🔍 检查当前目标','🔍 检查全部目标','🩺 环境诊断','📥 安装 / 校验 Pakku','📋 查看工作区状态')
-        '8'=@('🌿 查看 Git 状态','🔎 查看 Git Diff','📝 选择文件并提交','✅ 校验提交信息','📥 选择文件并暂存')
+        '1'=@("$(Get-UiIcon dev) 同步到测试实例","$(Get-UiIcon preview) 预览同步变化","$(Get-UiIcon runtime) 切换测试实例","$(Get-UiIcon target) 切换目标","$(Get-UiIcon recover) 恢复失败部署（Recover）")
+        '2'=@("$(Get-UiIcon add) 添加 Mod","$(Get-UiIcon remove) 删除 Mod","$(Get-UiIcon refresh) 更新指定 Mod","$(Get-UiIcon refresh) 更新全部 Mod","$(Get-UiIcon list) 查看 Mod 列表","$(Get-UiIcon search) 审查依赖增删","$(Get-UiIcon back) 恢复正式依赖","$(Get-UiIcon import) 从实例导入新增依赖")
+        '3'=@("$(Get-UiIcon list) 查看已绑定实例","$(Get-UiIcon bind) 绑定 PCL2 实例","$(Get-UiIcon bind) 绑定 HMCL 实例","$(Get-UiIcon runtime) 切换当前实例","$(Get-UiIcon unbind) 解除绑定")
+        '4'=@("$(Get-UiIcon list) 查看全部变化","$(Get-UiIcon search) 查看指定文件差异","$(Get-UiIcon import) 选择配置并回收","$(Get-UiIcon new) 审查新增配置","$(Get-UiIcon mod) 检查依赖偏离")
+        '5'=@("$(Get-UiIcon build) 构建当前目标","$(Get-UiIcon build) 构建所有目标","$(Get-UiIcon folder) 查看最近构建结果")
+        '6'=@("$(Get-UiIcon folder) 应用本地 MRPACK","$(Get-UiIcon settings) 应用 GitHub Actions Run","$(Get-UiIcon tag) 应用 GitHub Release")
+        '7'=@("$(Get-UiIcon check) 检查当前目标","$(Get-UiIcon check) 检查全部目标","$(Get-UiIcon doctor) 环境诊断","$(Get-UiIcon import) 安装 / 校验 Pakku","$(Get-UiIcon list) 查看工作区状态")
+        '8'=@("$(Get-UiIcon git) 查看 Git 状态","$(Get-UiIcon search) 查看 Git Diff","$(Get-UiIcon edit) 选择文件并提交","$(Get-UiIcon check) 校验提交信息","$(Get-UiIcon import) 选择文件并暂存")
     }
     $section=''
     $refresh=$true
@@ -632,12 +723,15 @@ function Show-Menu {
             }
         } else {
             $items=$menus[$section]
-            for ($i=0; $i -lt $items.Count; $i++) { Write-Host "  [$($i+1)] $($items[$i])" }
+            for ($i=0; $i -lt $items.Count; $i++) {
+                if ($section -eq '2' -and $i -eq 5) { Write-Host '  ── 依赖维护 ──' -ForegroundColor DarkGray }
+                Write-Host "  [$($i+1)] $($items[$i])"
+            }
         }
-        Write-Host "`n  [r] 🔄 刷新目标、实例与 Git 状态" -ForegroundColor DarkGray
-        Write-Host '  [d] 📄 查看上次操作的完整输出' -ForegroundColor DarkGray
+        Write-Host "`n  [r] $(Get-UiIcon refresh) 刷新目标、实例与 Git 状态" -ForegroundColor DarkGray
+        Write-Host "  [d] $(Get-UiIcon file) 查看上次操作的完整输出" -ForegroundColor DarkGray
         $backLabel=if ($section) { '返回上一级' } else { '退出' }
-        Write-Host "  [0] ↩️ $backLabel`n" -ForegroundColor DarkGray
+        Write-Host "  [0] $(Get-UiIcon back) $backLabel`n" -ForegroundColor DarkGray
         $choice=Read-Choice '请选择'
         if ($choice -eq '0') { if (-not $section) { return }; $section=''; continue }
         if ($choice -eq 'r') { $refresh=$true; continue }

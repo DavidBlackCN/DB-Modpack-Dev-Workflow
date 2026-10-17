@@ -17,6 +17,16 @@ fs.appendFileSync(process.env.MENU_LOG,JSON.stringify(args)+'\n');
 const spec=JSON.parse(fs.readFileSync(process.env.MENU_SPEC));
 const out=x=>console.log(JSON.stringify(x,null,2));
 const id=args[5];
+if(command==='build' && spec.progress) {
+  console.error('@mp:'+JSON.stringify({schema:1,type:'progress',stage:'build.verify',message:'fixture live progress'}));
+  const until=Date.now()+8000;
+  while(!fs.existsSync(process.env.MENU_ACK)) {
+    if(Date.now()>until){console.error('progress was buffered');process.exit(38);}
+    await new Promise(resolve=>setTimeout(resolve,20));
+  }
+  console.error('@mp:'+JSON.stringify({schema:1,type:'diagnostic',text:'PAKKU-RAW-DIAGNOSTIC'}));
+  if(spec.progressFailure){console.error('fixture progress failure');process.exit(37);}
+}
 if(command===spec.fail || (spec.failFile && args.includes('--file') && args.includes(spec.failFile))){console.error('fixture failure');process.exit(37);}
 switch(command){
 case 'status':out({selected:spec.selected,gitDirty:true,runtimes:[],targets:spec.targets.map(id=>({id})),bindings:spec.bindings});break;
@@ -53,11 +63,11 @@ async function fixture(t,override={}) {
   if(process.platform!=='win32')await fs.symlink(process.execPath,path.join(bin,'node'));
   const spec=path.join(root,'spec.json'),log=path.join(root,'calls.jsonl');
   await fs.writeFile(spec,JSON.stringify({selected:'a',targets:['a','b'],bindings:[{id:'dev-a',targetId:'a',launcher:'hmcl'},{id:'dev-b',targetId:'b'}],...override}));
-  const execute=(args=[],input='',extraEnv={})=>new Promise((resolve,reject)=>{
+  const execute=(args=[],input='',extraEnv={},onOutput=()=>{})=>new Promise((resolve,reject)=>{
     const child=spawn(pwsh,['-NoProfile','-NonInteractive','-File',path.join(root,'ci.ps1'),...args],{
       cwd:os.tmpdir(),env:{...process.env,PATH:bin,MENU_LOG:log,MENU_SPEC:spec,...extraEnv},windowsHide:true,
     });
-    let stdout='',stderr='';child.stdout.on('data',d=>stdout+=d);child.stderr.on('data',d=>stderr+=d);
+    let stdout='',stderr='';child.stdout.on('data',d=>{stdout+=d;onOutput(stdout);});child.stderr.on('data',d=>stderr+=d);
     const timeout=setTimeout(()=>{child.kill();reject(new Error(`menu timed out: ${stdout.slice(-1500)} ${stderr}`));},20000);
     child.on('error',reject);child.on('close',code=>{clearTimeout(timeout);resolve({code,stdout,stderr});});child.stdin.end(input);
   });
@@ -381,4 +391,38 @@ test('直接批量 CLI 转发选择清单，不添加接受确认',options,async
   assert.equal(result.code,0,result.stdout+result.stderr);
   assert.deepEqual((await f.commands()).at(-1),['import-deps','dev-a','--selection',selection,'--json']);
   assert.doesNotMatch(result.stdout,/\[y\/N|按 Enter 继续/);
+});
+
+
+test('进度必须在任务完成前显示，诊断只在 d 中显示，最终 JSON 仍可解析',options,async t=>{
+  const f=await fixture(t,{progress:true}),ack=path.join(f.root,'ack');
+  let acknowledged=false;
+  const result=await f.execute([],'5\n1\n\nd\n\n0\n0\n',{MENU_ACK:ack},output=>{
+    if(!acknowledged&&output.includes('fixture live progress')){acknowledged=true;fs.writeFile(ack,'continue');}
+  });
+  assert.equal(result.code,0,result.stdout+result.stderr);assert.ok(acknowledged);
+  assert.doesNotMatch(result.stdout,/progress was buffered/);
+  const pause=result.stdout.indexOf('按 Enter 继续');
+  assert.match(result.stdout.slice(0,pause),/example.mrpack/);
+  assert.doesNotMatch(result.stdout.slice(0,pause),/PAKKU-RAW-DIAGNOSTIC|@mp:/);
+  assert.match(result.stdout.slice(pause),/PAKKU-RAW-DIAGNOSTIC/);
+});
+test('进度后的错误原因和退出码可见，操作失败仍暂停',options,async t=>{
+  const f=await fixture(t,{progress:true,progressFailure:true}),ack=path.join(f.root,'ack');
+  await fs.writeFile(ack,'continue');
+  const result=await f.execute([],'5\n1\n\n0\n0\n',{MENU_ACK:ack});
+  assert.match(result.stdout,/fixture progress failure/);assert.match(result.stdout,/退出码 37/);
+  assert.match(result.stdout,/构建失败/);assert.match(result.stdout,/按 Enter 继续/);
+});
+test('纯文本与 Nerd Font 菜单保持同一层级，预览不能写入',options,async t=>{
+  for(const mode of ['plain','nerd']) {
+    const f=await fixture(t),result=await f.execute([],'1\n2\nn\n\n0\n2\n0\n3\n0\n4\n0\n5\n0\n6\n0\n7\n0\n8\n0\n0\n',{MP_ICONS:mode});
+    assert.equal(result.code,0,result.stdout+result.stderr);
+    for(const label of ['开发环境','同步到测试实例','预览同步变化','切换测试实例','切换目标','配置与变化'])assert.ok(result.stdout.includes(label),label);
+    if(mode==='plain')assert.doesNotMatch(result.stdout,/[\uE000-\uF8FF\u{1F000}-\u{1FAFF}]/u);
+    else assert.match(result.stdout,/[\uE000-\uF8FF]/u);
+    const calls=await f.commands();assert.ok(calls.some(a=>a[0]==='prepare'));
+    assert.ok(calls.some(a=>a[0]==='dev'&&a.includes('--dry-run')));
+    assert.ok(!calls.some(a=>a.includes('--stopped')||a.includes('--confirm')));
+  }
 });
